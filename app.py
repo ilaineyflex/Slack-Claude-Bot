@@ -240,6 +240,11 @@ def get_fathom_recording(call_title, client_name=""):
 
 # ── Groq Summary ──────────────────────────────────────────────────────────────
 def generate_summary(transcript, client_name):
+    # Groq free tier limit is 12,000 TPM; truncate to stay safely under it
+    max_chars = 7000
+    if len(transcript) > max_chars:
+        transcript = transcript[:max_chars] + "\n\n[Transcript truncated due to length]"
+
     prompt = f"""You are an assistant helping a fitness coach named Elaine organize client call notes.
 
 Transcript from a coaching call with {client_name}:
