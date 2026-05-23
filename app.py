@@ -258,7 +258,7 @@ Return ONLY valid JSON with no extra text or markdown:
 Only include items in tasks_with_dates if a specific date was mentioned in the transcript. If no time was mentioned use 09:00. If none apply return an empty array."""
 
     response = gemini_client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-1.5-flash-latest",
         contents=prompt
     )
     text = response.text.strip().strip("```").strip("json").strip()
