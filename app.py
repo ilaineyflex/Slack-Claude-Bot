@@ -254,6 +254,31 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
     if summary_data.get("coach_tasks"):
         schedule_coach_tasks(summary_data["coach_tasks"], client_name)
 
+# ── Fathom helpers ────────────────────────────────────────────────────────────
+def _fathom_clean_display(text):
+    """Prepare Fathom markdown for Slack: strip hyperlinks, convert headers to bold."""
+    if not text:
+        return text
+    # [link text](url) → link text  (removes every embedded timestamp URL)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # ## Heading / ### Heading → *Heading*  (Slack bold instead of markdown headers)
+    text = re.sub(r'^#{1,4}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+    return text
+
+def _fathom_clean_ai(text):
+    """Prepare Fathom markdown for AI prompt: strip all markdown to save tokens."""
+    if not text:
+        return text
+    # [link text](url) → link text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # **bold** and *italic* → plain
+    text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
+    # ## headers → plain line (keep the heading text so structure is readable)
+    text = re.sub(r'^#{1,4}\s+', '', text, flags=re.MULTILINE)
+    # Collapse 3+ consecutive blank lines to 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 # ── Fathom ────────────────────────────────────────────────────────────────────
 def get_fathom_recording(call_title, client_name=""):
     headers = {"X-Api-Key": FATHOM_API_KEY}
@@ -333,9 +358,9 @@ def get_fathom_recording(call_title, client_name=""):
             if not fathom_summary_raw:
                 print(f"Fathom summary response shape: {list(s_body.keys()) if isinstance(s_body, dict) else type(s_body)}")
 
-    # Full summary for display in Slack; AI gets a slightly shorter version if very long
-    fathom_summary_full = fathom_summary_raw
-    fathom_summary_for_ai = fathom_summary_raw[:3000] if len(fathom_summary_raw) > 3000 else fathom_summary_raw
+    # Clean and prepare two versions of the Fathom summary
+    fathom_summary_full = _fathom_clean_display(fathom_summary_raw)   # Slack display
+    fathom_summary_for_ai = _fathom_clean_ai(fathom_summary_raw)      # AI prompt (no urls, no bold)
 
     print(f"Fetching transcript for recording_id: {recording_id}")
     transcript_resp = requests.get(
@@ -392,25 +417,31 @@ TASK 1 — client_summary (a text message Elaine will send to {client_name}):
 
 STRUCTURE (follow in order, no deviations):
 
-A. OPENING — 1 sentence. Warm and specific to THIS call's tone. Reference something that actually happened (e.g. "Glad we got to celebrate your wins today" if wins were discussed, or "Good catching up with you, {client_name}" if it was a general check-in). Use their first name. Never use "Good connecting with you today" as a generic opener.
+A. OPENING — 1 sentence. Read the Fathom Key Takeaways to understand the TONE of this specific call, then write an opener that matches it:
+   - Call where wins/progress were celebrated → "Glad we got to celebrate your wins today, [first name]!" or reference the specific celebration
+   - Call where there was a coach transition → acknowledge it warmly ("Thanks for being so open with me today and so understanding about the transition, [first name]")
+   - Call where client had a tough week or setback → open with care, not celebration ("Appreciate you being real with me today, [first name]")
+   - Routine check-in → brief warm opener that references what the call was about
+   NEVER reuse the same opener format for different clients. Use their first name. Do not use "Good connecting with you today" as a default.
 
-B. WINS — Name 1-2 specific measurable wins from the Fathom Key Takeaways. ALWAYS use before → after format if a starting number is mentioned anywhere (e.g. "249lbs → 241lbs", not just "down 8lbs"). Include the real-life impact if mentioned (e.g. "fitting into your shorts easier"). A touch of warmth is ok here ("woo!", ":)") but keep it brief.
+B. WINS — 1-2 specific measurable wins from the Fathom Key Takeaways. ALWAYS include before → after numbers if a starting point appears anywhere (e.g. "249lbs → 241lbs" not "down 8lbs"). Include the real-life impact if mentioned ("fitting into your shorts easier"). A small natural reaction is fine ("woo!", ":)") but do not force it.
 
-C. UPCOMING FOCUS — 1-2 sentences. Copy the exact focus from the Fathom summary's "New Focus" or equivalent section. Do not generalize. Do not invent focus areas.
+C. UPCOMING FOCUS — 1-2 sentences using the EXACT focus stated in the Fathom summary (Key Takeaways or New Focus section). Do not invent or generalize.
 
-D. CLIENT ACTION STEPS — bullet list using hyphens. Copy VERBATIM from the "Next Steps - {client_name}" section of the Fathom summary. Do not paraphrase. Do not add steps not in Fathom. If a link is mentioned, write [INSERT LINK]. Include deadlines exactly as stated.
+D. CLIENT ACTION STEPS — bullet list using hyphens. Find the Next Steps section in the Fathom summary. Under the subsection for {client_name} (not Elaine), copy each step VERBATIM. Do not paraphrase, shorten, or combine steps. If a link is referenced, write [INSERT LINK]. Keep all deadlines exactly as stated.
 
-E. PROGRAM RENEWAL / PHASE 2 — ONLY include this section if Fathom's Topics explicitly contains a renewal, Phase 2, or continuation discussion for THIS client. If it does, write 1-2 sentences connecting their stated goals to the next phase (internal motivation, not a sales pitch), plus the specific action ask (e.g. "review your finances and come prepared to discuss your options"). If no renewal was discussed, SKIP THIS SECTION ENTIRELY.
+E. PROGRAM RENEWAL / PHASE 2 — ONLY include if Fathom's Topics or Key Takeaways explicitly mentions a Phase 2, renewal, or program continuation discussion for THIS client. If yes: 1-2 sentences connecting their stated goals to the next phase + the specific action ask (e.g. "review your finances before our next call"). If not explicitly in the Fathom summary, OMIT THIS SECTION ENTIRELY — do not infer or add it.
 
-F. CLOSE — 1 warm direct line. Not "let me know if you have any questions."
+F. CLOSE — 1 warm, direct line. Not "let me know if you have any questions" or "looking forward to our next steps together."
 
 ====
 TASK 2 — coach_tasks (Elaine's to-do list):
 
-- Copy VERBATIM from the "Next Steps - Elaine" (or equivalent coach section) of the Fathom summary.
-- If the task doesn't name the client, add {client_name}'s name (e.g. "Schedule follow-up call" → "Schedule follow-up call with {client_name} for [date if mentioned]").
-- Do NOT rename any resources. If Fathom says "Bloating Masterclass", write "Bloating Masterclass". If Fathom says "hormonal health assessment forms", write that exactly.
-- Do NOT add, remove, or invent tasks. Include every task Fathom listed.
+Find the "Next Steps" section in the Fathom summary. It will have a subsection for Elaine (the coach). Copy every task listed there VERBATIM.
+- Include ALL tasks listed -- do not skip any.
+- Do NOT rename or paraphrase resources ("Bloating Masterclass" stays "Bloating Masterclass", "hormonal health assessment forms" stays exactly that).
+- If a task does not include {client_name}'s name, add it (e.g. "Schedule a follow-up call for next Friday" → "Schedule a follow-up call with {client_name} for next Friday").
+- Do NOT invent tasks. If the Fathom summary has 4 coach tasks, return 4 coach tasks.
 
 ====
 Return ONLY valid JSON, no markdown, no extra text. Use \\n for newlines inside strings, never literal newlines:
