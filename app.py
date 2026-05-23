@@ -80,7 +80,7 @@ def run_retroactive():
         print(f"Retroactive error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# ── Existing Slack Events ─────────────────────────────────────────────────────
+# ── Slack Events ──────────────────────────────────────────────────────────────
 @app.route("/", methods=["POST"])
 def slack_events():
     data = request.json
@@ -142,7 +142,11 @@ def run_post_call_automation(client_name, call_title):
         notify_fallback(f"Could not find Fathom recording for: *{call_title}*. Please check manually.")
         return
 
-    summary_data = generate_summary(fathom_data["transcript"], client_name)
+    summary_data = generate_summary(
+        fathom_data["transcript"],
+        client_name,
+        fathom_summary=fathom_data.get("fathom_summary", "")
+    )
 
     thread_result = find_client_thread(client_name)
     if not thread_result:
@@ -165,17 +169,19 @@ def run_post_call_automation(client_name, call_title):
         notify_fallback(alert)
         print("No thread found, posted to fallback channel.")
 
+    # Time-bound tasks: specific dates mentioned in the call
     if summary_data.get("tasks_with_dates"):
         create_calendar_tasks(summary_data["tasks_with_dates"])
+
+    # Non-dated coach tasks: schedule for 6pm next weekday/Saturday
+    if summary_data.get("coach_tasks"):
+        schedule_coach_tasks(summary_data["coach_tasks"], client_name)
 
 # ── Fathom ────────────────────────────────────────────────────────────────────
 def get_fathom_recording(call_title, client_name=""):
     headers = {"X-Api-Key": FATHOM_API_KEY}
 
-    response = requests.get(
-        "https://api.fathom.ai/external/v1/meetings",
-        headers=headers
-    )
+    response = requests.get("https://api.fathom.ai/external/v1/meetings", headers=headers)
     print("Fathom status:", response.status_code)
 
     if response.status_code != 200:
@@ -183,7 +189,6 @@ def get_fathom_recording(call_title, client_name=""):
         return None
 
     body = response.json()
-
     if isinstance(body, list):
         meetings = body
     elif isinstance(body, dict):
@@ -214,6 +219,31 @@ def get_fathom_recording(call_title, client_name=""):
     recording_id = matched.get("recording_id") or matched.get("id")
     meeting_url = matched.get("share_url") or matched.get("url") or f"https://fathom.video/calls/{recording_id}"
 
+    # Try to get Fathom's own AI summary from the meeting object
+    fathom_summary = ""
+    for field in ["summary", "ai_summary", "notes", "description"]:
+        val = matched.get(field)
+        if val and isinstance(val, str) and len(val) > 50:
+            fathom_summary = val[:2000]
+            print(f"Fathom summary found in meeting field '{field}' ({len(val)} chars)")
+            break
+
+    # If not in meeting object, try the recording summary endpoint
+    if not fathom_summary:
+        summary_resp = requests.get(
+            f"https://api.fathom.ai/external/v1/recordings/{recording_id}/summary",
+            headers=headers
+        )
+        print(f"Fathom summary endpoint status: {summary_resp.status_code}")
+        if summary_resp.status_code == 200:
+            s_body = summary_resp.json()
+            for field in ["summary", "text", "content", "ai_summary", "notes"]:
+                val = s_body.get(field) if isinstance(s_body, dict) else None
+                if val and isinstance(val, str) and len(val) > 50:
+                    fathom_summary = val[:2000]
+                    print(f"Fathom summary found at endpoint field '{field}'")
+                    break
+
     print(f"Fetching transcript for recording_id: {recording_id}")
     transcript_resp = requests.get(
         f"https://api.fathom.ai/external/v1/recordings/{recording_id}/transcript",
@@ -236,31 +266,43 @@ def get_fathom_recording(call_title, client_name=""):
         "url": meeting_url,
         "transcript": transcript_text,
         "title": matched.get("title", ""),
+        "fathom_summary": fathom_summary,
     }
 
 # ── Groq Summary ──────────────────────────────────────────────────────────────
-def generate_summary(transcript, client_name):
-    # Groq free tier limit is 12,000 TPM; truncate to stay safely under it
-    max_chars = 7000
-    if len(transcript) > max_chars:
-        transcript = transcript[:max_chars] + "\n\n[Transcript truncated due to length]"
+def generate_summary(transcript, client_name, fathom_summary=""):
+    tz = pytz.timezone(TIMEZONE)
+    today_str = datetime.now(tz).strftime("%Y-%m-%d")
+    current_year = datetime.now(tz).year
 
-    prompt = f"""You are an assistant helping a fitness coach named Elaine organize client call notes.
+    # If we have a Fathom summary it covers the full call; use less raw transcript
+    max_transcript_chars = 4000 if fathom_summary else 7000
+    if len(transcript) > max_transcript_chars:
+        transcript = transcript[:max_transcript_chars] + "\n\n[Transcript truncated]"
 
-Transcript from a coaching call with {client_name}:
+    fathom_context = (
+        f"\nFathom's auto-generated call summary (use this to fill in details cut by truncation):\n{fathom_summary}\n"
+        if fathom_summary else ""
+    )
 
+    prompt = f"""You are writing post-call notes on behalf of Elaine, a fitness coach. Today is {today_str}.
+
+Elaine's tone: warm, direct, fun and sassy, authoritative, bold. She texts clients like a knowledgeable friend who holds them accountable. She uses casual language and is specific and action-oriented.
+
+Transcript from Elaine's coaching call with {client_name}:
 {transcript}
-
-Return ONLY valid JSON with no extra text or markdown:
+{fathom_context}
+Return ONLY valid JSON, no markdown, no extra text:
 {{
-  "client_summary": "Bullet point summary Elaine can copy and send directly to the client. Include key discussion points and any action steps the CLIENT needs to take. Write as if speaking directly to the client.",
-  "coach_tasks": ["Task 1 for Elaine", "Task 2 for Elaine"],
+  "client_summary": "A text-message-style note Elaine will send directly to {client_name}. Rules: (1) Open by celebrating any specific wins mentioned (weight lost, energy, habit improvements) -- be enthusiastic and name the specific win. (2) State what the focus is for the next 1-2 weeks and WHY based on what was discussed. (3) List the client's specific action steps with deadlines if mentioned. (4) Close warmly and encourage. Do NOT include general life chat or rapport unless it directly explains a coaching recommendation. Match Elaine's voice: casual, warm, direct, bold -- like a text from a coach who's also your hype woman.",
+  "coach_tasks": ["Specific concrete task Elaine needs to do, e.g. Send {client_name} the [resource name] link", "Schedule follow-up call with {client_name} for [date if mentioned]"],
   "tasks_with_dates": [
-    {{"task": "description", "due_date": "YYYY-MM-DD", "due_time": "HH:MM"}}
+    {{"task": "task description", "due_date": "YYYY-MM-DD", "due_time": "HH:MM"}}
   ]
 }}
 
-Only include items in tasks_with_dates if a specific date was mentioned in the transcript. If no time was mentioned use 09:00. If none apply return an empty array."""
+tasks_with_dates rules: ONLY include tasks where a specific date was explicitly mentioned in the call. Always use year {current_year} unless a different future year was clearly stated. Use "09:00" if no time was given. Return [] if none apply.
+coach_tasks rules: List ALL tasks Elaine needs to complete that have no specific date attached. Be concrete -- name the client, the resource, or the deliverable. These will be auto-scheduled on Elaine's calendar."""
 
     completion = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -349,7 +391,18 @@ def notify_fallback(text):
         post_to_thread(channel_id, None, text)
 
 # ── Google Calendar ────────────────────────────────────────────────────────────
+def get_next_deadline():
+    """Returns 6pm on the next weekday or Saturday. No Sunday scheduling."""
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    candidate = now.date() + timedelta(days=1)
+    # weekday(): 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+    while candidate.weekday() == 6:  # Skip Sunday
+        candidate += timedelta(days=1)
+    return tz.localize(datetime(candidate.year, candidate.month, candidate.day, 18, 0))
+
 def create_calendar_tasks(tasks_with_dates):
+    """Create calendar events for tasks with explicit dates mentioned in the call."""
     if not GOOGLE_CREDENTIALS or not ELAINE_CALENDAR_ID:
         print("Google Calendar not configured, skipping.")
         return
@@ -360,6 +413,7 @@ def create_calendar_tasks(tasks_with_dates):
         )
         service = build("calendar", "v3", credentials=creds)
         tz = pytz.timezone(TIMEZONE)
+        now = datetime.now(tz)
 
         for task in tasks_with_dates:
             title = task.get("task", "Coaching task")
@@ -369,8 +423,15 @@ def create_calendar_tasks(tasks_with_dates):
                 continue
 
             start = tz.localize(datetime.strptime(f"{due_date} {due_time}", "%Y-%m-%d %H:%M"))
-            end = start + timedelta(hours=1)
 
+            # If the date is in the past (AI used wrong year), bump to current year
+            if start < now - timedelta(days=1):
+                start = start.replace(year=now.year)
+            # If still in the past after current-year fix, move to next year
+            if start < now - timedelta(days=1):
+                start = start.replace(year=now.year + 1)
+
+            end = start + timedelta(hours=1)
             event = {
                 "summary": title,
                 "start": {"dateTime": start.isoformat(), "timeZone": TIMEZONE},
@@ -384,9 +445,40 @@ def create_calendar_tasks(tasks_with_dates):
                 }
             }
             service.events().insert(calendarId=ELAINE_CALENDAR_ID, body=event).execute()
-            print(f"Calendar event created: {title} on {due_date}")
+            print(f"Calendar event created: {title} on {start.strftime('%Y-%m-%d %H:%M')}")
     except Exception as e:
         print(f"Calendar error: {e}")
+
+def schedule_coach_tasks(coach_tasks, client_name):
+    """Schedule non-dated coach tasks as calendar reminders due 6pm next weekday/Saturday."""
+    if not GOOGLE_CREDENTIALS or not ELAINE_CALENDAR_ID or not coach_tasks:
+        return
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(GOOGLE_CREDENTIALS),
+            scopes=["https://www.googleapis.com/auth/calendar"]
+        )
+        service = build("calendar", "v3", credentials=creds)
+        deadline = get_next_deadline()
+        end = deadline + timedelta(hours=1)
+
+        for task in coach_tasks:
+            event = {
+                "summary": f"[{client_name}] {task}",
+                "start": {"dateTime": deadline.isoformat(), "timeZone": TIMEZONE},
+                "end": {"dateTime": end.isoformat(), "timeZone": TIMEZONE},
+                "reminders": {
+                    "useDefault": False,
+                    "overrides": [
+                        {"method": "popup", "minutes": 1440},
+                        {"method": "popup", "minutes": 720},
+                    ]
+                }
+            }
+            service.events().insert(calendarId=ELAINE_CALENDAR_ID, body=event).execute()
+            print(f"Coach task scheduled: [{client_name}] {task} by {deadline.strftime('%Y-%m-%d %H:%M')}")
+    except Exception as e:
+        print(f"Coach task scheduling error: {e}")
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
