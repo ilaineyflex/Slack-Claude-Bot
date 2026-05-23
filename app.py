@@ -177,31 +177,55 @@ def get_fathom_recording(call_title, client_name=""):
         headers=headers
     )
     print("Fathom status:", response.status_code)
-    print("Fathom body:", response.text[:1000])
+    print("Fathom FULL body:", response.text[:3000])
 
     if response.status_code != 200:
         return None
 
     body = response.json()
-    meetings = body.get("data", body) if isinstance(body, dict) else body
+
+    # Detect response structure and extract the list of meetings
+    if isinstance(body, list):
+        meetings = body
+    elif isinstance(body, dict):
+        meetings = (
+            body.get("data") or
+            body.get("meetings") or
+            body.get("items") or
+            body.get("results") or
+            []
+        )
+        if not isinstance(meetings, list):
+            print("Unexpected meetings structure:", type(meetings), str(meetings)[:200])
+            return None
+    else:
+        print("Unexpected Fathom response type:", type(body))
+        return None
+
+    print(f"Total meetings returned: {len(meetings)}")
+    if meetings:
+        print("First meeting keys:", list(meetings[0].keys()) if isinstance(meetings[0], dict) else meetings[0])
 
     matched = None
     for meeting in meetings:
-        print("Meeting:", json.dumps(meeting, indent=2)[:300])
+        if not isinstance(meeting, dict):
+            print("Skipping non-dict meeting entry:", meeting)
+            continue
         title = (
             meeting.get("title") or
             meeting.get("topic") or
             meeting.get("name") or ""
         )
-        # Match by call title or client name
+        print(f"Checking Fathom meeting: '{title}'")
         if (call_title.lower() in title.lower() or
                 title.lower() in call_title.lower() or
                 (client_name and client_name.lower() in title.lower())):
             matched = meeting
+            print(f"Matched: {title}")
             break
 
     if not matched:
-        print(f"No Fathom recording matched: {call_title}")
+        print(f"No Fathom recording matched for: {call_title} / {client_name}")
         return None
 
     recording_id = matched.get("recording_id") or matched.get("id")
@@ -212,21 +236,24 @@ def get_fathom_recording(call_title, client_name=""):
         f"https://fathom.video/recordings/{recording_id}"
     )
 
+    print(f"Fetching transcript for recording_id: {recording_id}")
     transcript_resp = requests.get(
         f"https://api.fathom.ai/external/v1/recordings/{recording_id}/transcript",
         headers=headers
     )
     print("Transcript status:", transcript_resp.status_code)
-    print("Transcript body:", transcript_resp.text[:500])
+    print("Transcript body:", transcript_resp.text[:1000])
 
     transcript_text = ""
     if transcript_resp.status_code == 200:
         t_body = transcript_resp.json()
         segments = t_body.get("transcript", [])
-        transcript_text = "\n".join(
-            f"{s.get('speaker', {}).get('display_name', 'Unknown')}: {s.get('text', '')}"
-            for s in segments
-        )
+        if isinstance(segments, list):
+            transcript_text = "\n".join(
+                f"{s.get('speaker', {}).get('display_name', 'Unknown')}: {s.get('text', '')}"
+                for s in segments
+                if isinstance(s, dict)
+            )
 
     return {
         "url": meeting_url,
@@ -302,11 +329,8 @@ def find_client_thread(client_name):
     return None
 
 def extract_client_name_from_calendar_title(title):
-    # Remove "- Client Check-In Call" suffix
     title = re.split(r'\s*-\s*Client Check-In Call', title)[0].strip()
-    # Remove time info like "- 7:30 EST", "- 6:30 MST" and everything after
     title = re.split(r'\s*-?\s*\d+:\d+', title)[0].strip()
-    # Remove tags like *MAIN*
     title = re.sub(r'\*[^*]+\*', '', title).strip(' -').strip()
     return title
 
