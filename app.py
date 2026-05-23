@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytz
 import requests
-from google import genai
+from groq import Groq
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request
 from google.oauth2 import service_account
@@ -14,7 +14,7 @@ from googleapiclient.discovery import build
 # ── Config ────────────────────────────────────────────────────────────────────
 SLACK_BOT_TOKEN    = os.environ.get("SLACK_BOT_TOKEN", "")
 FATHOM_API_KEY     = os.environ.get("FATHOM_API_KEY", "")
-GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY       = os.environ.get("GROQ_API_KEY", "")
 GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 ELAINE_CALENDAR_ID = os.environ.get("ELAINE_CALENDAR_ID", "")
 ROSTER_CHANNEL     = os.environ.get("ROSTER_CHANNEL", "elaine-roster")
@@ -23,7 +23,7 @@ TIMEZONE           = os.environ.get("TIMEZONE", "America/Los_Angeles")
 
 # ── Initialize ────────────────────────────────────────────────────────────────
 app = Flask(__name__)
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
 scheduler.start()
 
@@ -238,7 +238,7 @@ def get_fathom_recording(call_title, client_name=""):
         "title": matched.get("title", ""),
     }
 
-# ── Gemini Summary ────────────────────────────────────────────────────────────
+# ── Groq Summary ──────────────────────────────────────────────────────────────
 def generate_summary(transcript, client_name):
     prompt = f"""You are an assistant helping a fitness coach named Elaine organize client call notes.
 
@@ -257,17 +257,18 @@ Return ONLY valid JSON with no extra text or markdown:
 
 Only include items in tasks_with_dates if a specific date was mentioned in the transcript. If no time was mentioned use 09:00. If none apply return an empty array."""
 
-    response = gemini_client.models.generate_content(
-        model="gemini-1.5-flash-latest",
-        contents=prompt
+    completion = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3
     )
-    text = response.text.strip().strip("```").strip("json").strip()
+    text = completion.choices[0].message.content.strip().strip("```").strip("json").strip()
 
     try:
         return json.loads(text)
     except Exception as e:
-        print(f"Gemini parse error: {e}\nRaw: {response.text}")
-        return {"client_summary": response.text, "coach_tasks": [], "tasks_with_dates": []}
+        print(f"Groq parse error: {e}\nRaw: {text}")
+        return {"client_summary": text, "coach_tasks": [], "tasks_with_dates": []}
 
 # ── Slack Helpers ─────────────────────────────────────────────────────────────
 def get_channel_id(channel_name):
