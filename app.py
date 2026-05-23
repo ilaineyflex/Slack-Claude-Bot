@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 from datetime import datetime, timedelta
 
 import pytz
@@ -64,17 +65,22 @@ def run_retroactive():
         events = events_result.get("items", [])
         print(f"Found {len(events)} matching calendar events")
 
-        processed = []
+        processing = []
         for event in events:
             title = event.get("summary", "")
             if "Client Check-In Call" not in title:
                 continue
             client_name = extract_client_name_from_calendar_title(title)
-            print(f"Processing: {title} -> Client: {client_name}")
-            run_post_call_automation(client_name, title)
-            processed.append({"title": title, "client": client_name})
+            print(f"Queuing: {title} -> Client: {client_name}")
+            t = threading.Thread(
+                target=run_post_call_automation,
+                args=[client_name, title],
+                daemon=True
+            )
+            t.start()
+            processing.append({"title": title, "client": client_name})
 
-        return jsonify({"processed": processed, "count": len(processed)}), 200
+        return jsonify({"processing": processing, "count": len(processing), "status": "started in background"}), 200
 
     except Exception as e:
         print(f"Retroactive error: {e}")
@@ -285,24 +291,41 @@ def generate_summary(transcript, client_name, fathom_summary=""):
         if fathom_summary else ""
     )
 
-    prompt = f"""You are writing post-call notes on behalf of Elaine, a fitness coach. Today is {today_str}.
+    prompt = f"""You are writing a post-call text message from Elaine to her coaching client {client_name}. Today is {today_str}.
 
-Elaine's tone: warm, direct, fun and sassy, authoritative, bold. She texts clients like a knowledgeable friend who holds them accountable. She uses casual language and is specific and action-oriented.
+ELAINE'S BRAND VOICE (follow this exactly):
+- Warm, direct, specific, slightly sassy. Like a knowledgeable friend texting over DMs -- not a hype woman, not a medical journal.
+- She is authoritative and compassionate through PRECISION, not through enthusiasm announcements. The wins she calls out are specific (a number, a symptom, a change) not generic praise.
+- Tone sits between clinical and cheerleader. Specific like a specialist. Conversational like a trusted friend.
+- She explains the "why" in plain language: "your belly fat is an insulin problem" not "hormonal architecture issues."
+- She is direct and does not hedge. She does not perform warmth with filler phrases.
+
+WORDS AND PHRASES BANNED FOR THIS BRAND:
+- "journey" (completely banned)
+- "I see you", "you deserve better", "you're not lazy", "you've got this queen"
+- "amazing!", excessive exclamation chains, over-the-top hype language
+- Clinical terms the client has to Google: "visceral adipose tissue", "HPA axis", "phenotype"
+- Generic opener praise that could apply to anyone
+
+PREFERRED LANGUAGE (use where relevant):
+- "belly fat", "energy that lasts", "period back", "feel like yourself again", "fit into", "in control"
+- "your body is responding", "that's your hormones shifting", "here's what that means for next steps"
+- Plain mechanism explanations: "the fatigue is dropping because your cortisol load is coming down"
 
 Transcript from Elaine's coaching call with {client_name}:
 {transcript}
 {fathom_context}
 Return ONLY valid JSON, no markdown, no extra text:
 {{
-  "client_summary": "A text-message-style note Elaine will send directly to {client_name}. Rules: (1) Open by celebrating any specific wins mentioned (weight lost, energy, habit improvements) -- be enthusiastic and name the specific win. (2) State what the focus is for the next 1-2 weeks and WHY based on what was discussed. (3) List the client's specific action steps with deadlines if mentioned. (4) Close warmly and encourage. Do NOT include general life chat or rapport unless it directly explains a coaching recommendation. Match Elaine's voice: casual, warm, direct, bold -- like a text from a coach who's also your hype woman.",
-  "coach_tasks": ["Specific concrete task Elaine needs to do, e.g. Send {client_name} the [resource name] link", "Schedule follow-up call with {client_name} for [date if mentioned]"],
+  "client_summary": "A text message Elaine will send directly to {client_name}. Structure: (1) Name 1-2 specific wins from the call -- use the actual number, symptom, or change. Connect each win to what it means for progress in one sentence. (2) State the focus for the next 1-2 weeks and the plain-language reason why in 1-2 sentences. (3) List the client's action steps as bullet points using hyphens, with any deadlines stated clearly. (4) One-line warm close -- direct, not filler. Do NOT include small talk, rapport chat, or life details unless they directly explain a coaching recommendation. Do NOT open with a generic compliment. Start with the win.",
+  "coach_tasks": ["Specific task Elaine must complete, naming the client and deliverable: e.g. Send {client_name} the [resource name] link", "Schedule follow-up call with {client_name} for [date if mentioned]"],
   "tasks_with_dates": [
     {{"task": "task description", "due_date": "YYYY-MM-DD", "due_time": "HH:MM"}}
   ]
 }}
 
 tasks_with_dates rules: ONLY include tasks where a specific date was explicitly mentioned in the call. Always use year {current_year} unless a different future year was clearly stated. Use "09:00" if no time was given. Return [] if none apply.
-coach_tasks rules: List ALL tasks Elaine needs to complete that have no specific date attached. Be concrete -- name the client, the resource, or the deliverable. These will be auto-scheduled on Elaine's calendar."""
+coach_tasks rules: List ALL tasks Elaine needs to complete that have no specific date. Be concrete -- name the client, the resource, the link, or the deliverable. These get auto-scheduled on Elaine's calendar."""
 
     completion = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
