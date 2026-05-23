@@ -177,46 +177,29 @@ def get_fathom_recording(call_title, client_name=""):
         headers=headers
     )
     print("Fathom status:", response.status_code)
-    print("Fathom FULL body:", response.text[:3000])
 
     if response.status_code != 200:
+        print("Fathom error:", response.text[:500])
         return None
 
     body = response.json()
 
-    # Detect response structure and extract the list of meetings
     if isinstance(body, list):
         meetings = body
     elif isinstance(body, dict):
-        meetings = (
-            body.get("data") or
-            body.get("meetings") or
-            body.get("items") or
-            body.get("results") or
-            []
-        )
-        if not isinstance(meetings, list):
-            print("Unexpected meetings structure:", type(meetings), str(meetings)[:200])
-            return None
+        meetings = body.get("items") or body.get("data") or body.get("meetings") or []
     else:
         print("Unexpected Fathom response type:", type(body))
         return None
 
     print(f"Total meetings returned: {len(meetings)}")
-    if meetings:
-        print("First meeting keys:", list(meetings[0].keys()) if isinstance(meetings[0], dict) else meetings[0])
 
     matched = None
     for meeting in meetings:
         if not isinstance(meeting, dict):
-            print("Skipping non-dict meeting entry:", meeting)
             continue
-        title = (
-            meeting.get("title") or
-            meeting.get("topic") or
-            meeting.get("name") or ""
-        )
-        print(f"Checking Fathom meeting: '{title}'")
+        title = meeting.get("title") or meeting.get("meeting_title") or ""
+        print(f"Checking: '{title}'")
         if (call_title.lower() in title.lower() or
                 title.lower() in call_title.lower() or
                 (client_name and client_name.lower() in title.lower())):
@@ -229,12 +212,7 @@ def get_fathom_recording(call_title, client_name=""):
         return None
 
     recording_id = matched.get("recording_id") or matched.get("id")
-    meeting_url = (
-        matched.get("url") or
-        matched.get("share_url") or
-        matched.get("recording_url") or
-        f"https://fathom.video/recordings/{recording_id}"
-    )
+    meeting_url = matched.get("share_url") or matched.get("url") or f"https://fathom.video/calls/{recording_id}"
 
     print(f"Fetching transcript for recording_id: {recording_id}")
     transcript_resp = requests.get(
@@ -242,7 +220,6 @@ def get_fathom_recording(call_title, client_name=""):
         headers=headers
     )
     print("Transcript status:", transcript_resp.status_code)
-    print("Transcript body:", transcript_resp.text[:1000])
 
     transcript_text = ""
     if transcript_resp.status_code == 200:
@@ -281,7 +258,7 @@ Return ONLY valid JSON with no extra text or markdown:
 Only include items in tasks_with_dates if a specific date was mentioned in the transcript. If no time was mentioned use 09:00. If none apply return an empty array."""
 
     response = gemini_client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=prompt
     )
     text = response.text.strip().strip("```").strip("json").strip()
