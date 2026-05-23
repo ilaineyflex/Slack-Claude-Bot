@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime, timedelta
 
 import pytz
@@ -136,7 +137,7 @@ def ghl_webhook():
 def run_post_call_automation(client_name, call_title):
     print(f"\n=== Post-call automation: {client_name} ===")
 
-    fathom_data = get_fathom_recording(call_title)
+    fathom_data = get_fathom_recording(call_title, client_name)
     if not fathom_data:
         notify_fallback(f"Could not find Fathom recording for: *{call_title}*. Please check manually.")
         return
@@ -145,9 +146,9 @@ def run_post_call_automation(client_name, call_title):
 
     thread_result = find_client_thread(client_name)
     if not thread_result:
+        print(f"No thread found for {client_name}, trying fallback name extraction")
         name_from_title = extract_name_from_title(call_title)
         if name_from_title:
-            print(f"Trying name from title: {name_from_title}")
             thread_result = find_client_thread(name_from_title)
 
     message = format_message(client_name, fathom_data["url"], summary_data)
@@ -168,13 +169,12 @@ def run_post_call_automation(client_name, call_title):
         create_calendar_tasks(summary_data["tasks_with_dates"])
 
 # ── Fathom ────────────────────────────────────────────────────────────────────
-def get_fathom_recording(call_title):
-    headers = {"Authorization": f"Bearer {FATHOM_API_KEY}"}
+def get_fathom_recording(call_title, client_name=""):
+    headers = {"X-Api-Key": FATHOM_API_KEY}
 
     response = requests.get(
         "https://api.fathom.ai/external/v1/meetings",
-        headers=headers,
-        params={"limit": 20}
+        headers=headers
     )
     print("Fathom status:", response.status_code)
     print("Fathom body:", response.text[:1000])
@@ -185,40 +185,54 @@ def get_fathom_recording(call_title):
     body = response.json()
     meetings = body.get("data", body) if isinstance(body, dict) else body
 
+    matched = None
     for meeting in meetings:
-        print("Meeting fields:", json.dumps(meeting, indent=2)[:500])
-        title = meeting.get("title", "") or meeting.get("topic", "") or meeting.get("name", "")
-        if call_title.lower() in title.lower() or title.lower() in call_title.lower():
-            recording_id = meeting.get("recording_id") or meeting.get("id")
-            meeting_url = meeting.get("url") or meeting.get("share_url") or meeting.get("recording_url") or f"https://fathom.video/recordings/{recording_id}"
+        print("Meeting:", json.dumps(meeting, indent=2)[:300])
+        title = (
+            meeting.get("title") or
+            meeting.get("topic") or
+            meeting.get("name") or ""
+        )
+        # Match by call title or client name
+        if (call_title.lower() in title.lower() or
+                title.lower() in call_title.lower() or
+                (client_name and client_name.lower() in title.lower())):
+            matched = meeting
+            break
 
-            transcript_resp = requests.get(
-                f"https://api.fathom.ai/external/v1/recordings/{recording_id}/transcript",
-                headers=headers
-            )
-            print("Transcript status:", transcript_resp.status_code)
-            print("Transcript body:", transcript_resp.text[:500])
+    if not matched:
+        print(f"No Fathom recording matched: {call_title}")
+        return None
 
-            transcript_text = ""
-            if transcript_resp.status_code == 200:
-                t_body = transcript_resp.json()
-                segments = t_body.get("segments", t_body.get("data", t_body.get("transcript", [])))
-                if isinstance(segments, list):
-                    transcript_text = "\n".join(
-                        f"{s.get('speaker', s.get('name', 'Unknown'))}: {s.get('text', s.get('content', ''))}"
-                        for s in segments
-                    )
-                elif isinstance(segments, str):
-                    transcript_text = segments
+    recording_id = matched.get("recording_id") or matched.get("id")
+    meeting_url = (
+        matched.get("url") or
+        matched.get("share_url") or
+        matched.get("recording_url") or
+        f"https://fathom.video/recordings/{recording_id}"
+    )
 
-            return {
-                "url": meeting_url,
-                "transcript": transcript_text,
-                "title": title,
-            }
+    transcript_resp = requests.get(
+        f"https://api.fathom.ai/external/v1/recordings/{recording_id}/transcript",
+        headers=headers
+    )
+    print("Transcript status:", transcript_resp.status_code)
+    print("Transcript body:", transcript_resp.text[:500])
 
-    print(f"No Fathom recording matched: {call_title}")
-    return None
+    transcript_text = ""
+    if transcript_resp.status_code == 200:
+        t_body = transcript_resp.json()
+        segments = t_body.get("transcript", [])
+        transcript_text = "\n".join(
+            f"{s.get('speaker', {}).get('display_name', 'Unknown')}: {s.get('text', '')}"
+            for s in segments
+        )
+
+    return {
+        "url": meeting_url,
+        "transcript": transcript_text,
+        "title": matched.get("title", ""),
+    }
 
 # ── Gemini Summary ────────────────────────────────────────────────────────────
 def generate_summary(transcript, client_name):
@@ -288,15 +302,13 @@ def find_client_thread(client_name):
     return None
 
 def extract_client_name_from_calendar_title(title):
-    if " - Client Check-In Call" in title:
-        return title.split(" - Client Check-In Call")[0].strip()
-    if "- Client Check-In Call" in title:
-        return title.split("- Client Check-In Call")[0].strip()
-    if "Client Check-In Call - " in title:
-        return title.split("Client Check-In Call - ")[1].strip()
-    if "Client Check-In Call with " in title:
-        return title.split("Client Check-In Call with ")[1].strip()
-    return title.replace("Client Check-In Call", "").strip(" -").strip()
+    # Remove "- Client Check-In Call" suffix
+    title = re.split(r'\s*-\s*Client Check-In Call', title)[0].strip()
+    # Remove time info like "- 7:30 EST", "- 6:30 MST" and everything after
+    title = re.split(r'\s*-?\s*\d+:\d+', title)[0].strip()
+    # Remove tags like *MAIN*
+    title = re.sub(r'\*[^*]+\*', '', title).strip(' -').strip()
+    return title
 
 def extract_name_from_title(call_title):
     if " - " in call_title:
