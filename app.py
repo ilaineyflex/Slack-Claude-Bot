@@ -52,22 +52,9 @@ def ghl_webhook():
     data = request.json
     print("GHL webhook received:", json.dumps(data, indent=2))
 
-    appointment_title = (
-        data.get("appointment", {}).get("title") or
-        data.get("title") or
-        data.get("name") or ""
-    )
-    client_name = (
-        data.get("contact", {}).get("name") or
-        data.get("contact", {}).get("full_name") or
-        data.get("contactName") or ""
-    )
-    end_time_str = (
-        data.get("appointment", {}).get("endTime") or
-        data.get("endTime") or
-        data.get("end_time") or ""
-    )
-
+     appointment_title = data.get("calendar", {}).get("title", "")
+    client_name = data.get("full_name", "") or data.get("contact", {}).get("full_name", "")
+    end_time_str = data.get("calendar", {}).get("endTime", "")
     print(f"Title: {appointment_title} | Client: {client_name} | End: {end_time_str}")
 
     if "Client Check-In Call" not in appointment_title:
