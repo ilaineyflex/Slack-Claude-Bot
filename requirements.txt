@@ -2,7 +2,7 @@ flask
 requests
 gunicorn
 apscheduler
-google-genai
+groq
 google-api-python-client
 google-auth
 pytz
