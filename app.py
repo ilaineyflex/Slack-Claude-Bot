@@ -31,6 +31,54 @@ scheduler.start()
 def ping():
     return "OK", 200
 
+# ── Retroactive Trigger ───────────────────────────────────────────────────────
+@app.route("/run-retroactive", methods=["GET"])
+def run_retroactive():
+    start_date = request.args.get("start", "2026-05-21")
+    end_date = request.args.get("end", "2026-05-22")
+
+    if not GOOGLE_CREDENTIALS or not ELAINE_CALENDAR_ID:
+        return jsonify({"error": "Google Calendar not configured"}), 500
+
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(GOOGLE_CREDENTIALS),
+            scopes=["https://www.googleapis.com/auth/calendar"]
+        )
+        service = build("calendar", "v3", credentials=creds)
+        tz = pytz.timezone(TIMEZONE)
+
+        start_dt = tz.localize(datetime.strptime(start_date, "%Y-%m-%d"))
+        end_dt = tz.localize(datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1))
+
+        events_result = service.events().list(
+            calendarId=ELAINE_CALENDAR_ID,
+            timeMin=start_dt.isoformat(),
+            timeMax=end_dt.isoformat(),
+            q="Client Check-In Call",
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+
+        events = events_result.get("items", [])
+        print(f"Found {len(events)} matching calendar events")
+
+        processed = []
+        for event in events:
+            title = event.get("summary", "")
+            if "Client Check-In Call" not in title:
+                continue
+            client_name = extract_client_name_from_calendar_title(title)
+            print(f"Processing: {title} -> Client: {client_name}")
+            run_post_call_automation(client_name, title)
+            processed.append({"title": title, "client": client_name})
+
+        return jsonify({"processed": processed, "count": len(processed)}), 200
+
+    except Exception as e:
+        print(f"Retroactive error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # ── Existing Slack Events ─────────────────────────────────────────────────────
 @app.route("/", methods=["POST"])
 def slack_events():
@@ -229,6 +277,17 @@ def find_client_thread(client_name):
     print(f"No thread found for: {client_name}")
     return None
 
+def extract_client_name_from_calendar_title(title):
+    if " - Client Check-In Call" in title:
+        return title.split(" - Client Check-In Call")[0].strip()
+    if "- Client Check-In Call" in title:
+        return title.split("- Client Check-In Call")[0].strip()
+    if "Client Check-In Call - " in title:
+        return title.split("Client Check-In Call - ")[1].strip()
+    if "Client Check-In Call with " in title:
+        return title.split("Client Check-In Call with ")[1].strip()
+    return title.replace("Client Check-In Call", "").strip(" -").strip()
+
 def extract_name_from_title(call_title):
     if " - " in call_title:
         return call_title.split(" - ")[-1].strip()
@@ -295,7 +354,7 @@ def create_calendar_tasks(tasks_with_dates):
                     ]
                 }
             }
-            result = service.events().insert(calendarId=ELAINE_CALENDAR_ID, body=event).execute()
+            service.events().insert(calendarId=ELAINE_CALENDAR_ID, body=event).execute()
             print(f"Calendar event created: {title} on {due_date}")
     except Exception as e:
         print(f"Calendar error: {e}")
