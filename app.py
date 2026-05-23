@@ -382,6 +382,14 @@ def get_fathom_recording(call_title, client_name=""):
                 if isinstance(s, dict)
             )
 
+    # If both Fathom content endpoints failed (e.g. temporary 502/503), treat as
+    # "not ready" so the caller posts an alert instead of empty content.
+    if not transcript_text and not fathom_summary_raw:
+        if transcript_resp.status_code != 200:
+            print(f"Fathom transcript returned {transcript_resp.status_code} and no summary found "
+                  f"-- treating recording as not ready (possible Fathom outage)")
+            return None
+
     return {
         "url": meeting_url,
         "transcript": transcript_text,
