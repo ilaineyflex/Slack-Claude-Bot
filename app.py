@@ -21,6 +21,12 @@ ELAINE_CALENDAR_ID = os.environ.get("ELAINE_CALENDAR_ID", "")
 ROSTER_CHANNEL     = os.environ.get("ROSTER_CHANNEL", "elaine-roster")
 FALLBACK_CHANNEL   = os.environ.get("FALLBACK_CHANNEL", "ceo-braindump")
 TIMEZONE           = os.environ.get("TIMEZONE", "America/Los_Angeles")
+GHL_API_KEY        = os.environ.get("GHL_API_KEY", "")
+GHL_LOCATION_ID    = os.environ.get("GHL_LOCATION_ID", "")
+ELAINE_PHONE       = os.environ.get("ELAINE_PHONE", "2508017038")
+
+# Minutes after call end time for each attempt: 5, 10, 20, 30, 60
+RETRY_DELAYS = [5, 10, 20, 30, 60]
 
 # ── Initialize ────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -74,7 +80,7 @@ def run_retroactive():
             print(f"Queuing: {title} -> Client: {client_name}")
             t = threading.Thread(
                 target=run_post_call_automation,
-                args=[client_name, title],
+                args=[client_name, title, None, 1],  # no retries for retroactive
                 daemon=True
             )
             t.start()
@@ -123,29 +129,58 @@ def ghl_webhook():
 
     try:
         end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
-        run_at = end_time + timedelta(minutes=20)
-        print(f"Scheduling automation to run at {run_at}")
+        end_time_iso = end_time.isoformat()
+        run_at = end_time + timedelta(minutes=RETRY_DELAYS[0])  # first attempt: 5 min
+        print(f"Scheduling attempt 1 at {run_at} ({RETRY_DELAYS[0]} min after call end)")
 
         scheduler.add_job(
             run_post_call_automation,
             "date",
             run_date=run_at,
-            args=[client_name, appointment_title],
-            id=f"call_{client_name}_{end_time_str}",
+            args=[client_name, appointment_title, end_time_iso, 1],
+            id=f"call_{client_name}_{end_time_str}_attempt_1",
             replace_existing=True
         )
-        return jsonify({"status": "scheduled", "run_at": run_at.isoformat()}), 200
+        return jsonify({"status": "scheduled", "run_at": run_at.isoformat(), "attempt": 1}), 200
     except Exception as e:
         print(f"Error scheduling: {e}")
         return "", 500
 
 # ── Main Automation ───────────────────────────────────────────────────────────
-def run_post_call_automation(client_name, call_title):
-    print(f"\n=== Post-call automation: {client_name} ===")
+def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt=1):
+    print(f"\n=== Post-call automation: {client_name} (attempt {attempt}/{len(RETRY_DELAYS)}) ===")
 
     fathom_data = get_fathom_recording(call_title, client_name)
     if not fathom_data:
-        notify_fallback(f"Could not find Fathom recording for: *{call_title}*. Please check manually.")
+        # Schedule next retry if we have remaining attempts and a live end_time
+        if end_time_iso and attempt < len(RETRY_DELAYS):
+            next_attempt = attempt + 1
+            delay_min = RETRY_DELAYS[next_attempt - 1]
+            end_time = datetime.fromisoformat(end_time_iso)
+            run_at = end_time + timedelta(minutes=delay_min)
+            print(f"Fathom not found -- scheduling retry {next_attempt} at {run_at} ({delay_min} min after call end)")
+            scheduler.add_job(
+                run_post_call_automation,
+                "date",
+                run_date=run_at,
+                args=[client_name, call_title, end_time_iso, next_attempt],
+                id=f"call_{client_name}_{end_time_iso}_attempt_{next_attempt}",
+                replace_existing=True
+            )
+        else:
+            # All retries exhausted (or retroactive lookup) -- alert via Slack + SMS
+            alert = (
+                f"Could not find Fathom recording for *{client_name}*'s call after "
+                f"{'all ' + str(len(RETRY_DELAYS)) + ' attempts (1 hour)' if end_time_iso else 'retroactive lookup'}.\n"
+                f"Call: _{call_title}_\nPlease check Fathom manually."
+            )
+            notify_fallback(alert)
+            if end_time_iso:
+                send_ghl_sms(
+                    f"Hi Elaine, the post-call summary for {client_name}'s check-in call "
+                    f"could not be found in Fathom after 1 hour of retries. "
+                    f"Call: {call_title}. Please check Fathom manually."
+                )
         return
 
     summary_data = generate_summary(
@@ -161,7 +196,12 @@ def run_post_call_automation(client_name, call_title):
         if name_from_title:
             thread_result = find_client_thread(name_from_title)
 
-    message = format_message(client_name, fathom_data["url"], summary_data)
+    message = format_message(
+        client_name,
+        fathom_data["url"],
+        summary_data,
+        fathom_summary_full=fathom_data.get("fathom_summary_full", "")
+    )
 
     if thread_result:
         channel_id, thread_ts = thread_result
@@ -226,16 +266,16 @@ def get_fathom_recording(call_title, client_name=""):
     meeting_url = matched.get("share_url") or matched.get("url") or f"https://fathom.video/calls/{recording_id}"
 
     # Try to get Fathom's own AI summary from the meeting object
-    fathom_summary = ""
+    fathom_summary_raw = ""
     for field in ["summary", "ai_summary", "notes", "description"]:
         val = matched.get(field)
         if val and isinstance(val, str) and len(val) > 50:
-            fathom_summary = val[:2000]
+            fathom_summary_raw = val
             print(f"Fathom summary found in meeting field '{field}' ({len(val)} chars)")
             break
 
     # If not in meeting object, try the recording summary endpoint
-    if not fathom_summary:
+    if not fathom_summary_raw:
         summary_resp = requests.get(
             f"https://api.fathom.ai/external/v1/recordings/{recording_id}/summary",
             headers=headers
@@ -246,9 +286,13 @@ def get_fathom_recording(call_title, client_name=""):
             for field in ["summary", "text", "content", "ai_summary", "notes"]:
                 val = s_body.get(field) if isinstance(s_body, dict) else None
                 if val and isinstance(val, str) and len(val) > 50:
-                    fathom_summary = val[:2000]
+                    fathom_summary_raw = val
                     print(f"Fathom summary found at endpoint field '{field}'")
                     break
+
+    # Full summary for display in Slack; AI gets a slightly shorter version if very long
+    fathom_summary_full = fathom_summary_raw
+    fathom_summary_for_ai = fathom_summary_raw[:3000] if len(fathom_summary_raw) > 3000 else fathom_summary_raw
 
     print(f"Fetching transcript for recording_id: {recording_id}")
     transcript_resp = requests.get(
@@ -272,7 +316,8 @@ def get_fathom_recording(call_title, client_name=""):
         "url": meeting_url,
         "transcript": transcript_text,
         "title": matched.get("title", ""),
-        "fathom_summary": fathom_summary,
+        "fathom_summary": fathom_summary_for_ai,
+        "fathom_summary_full": fathom_summary_full,
     }
 
 # ── Groq Summary ──────────────────────────────────────────────────────────────
@@ -287,45 +332,55 @@ def generate_summary(transcript, client_name, fathom_summary=""):
         transcript = transcript[:max_transcript_chars] + "\n\n[Transcript truncated]"
 
     fathom_context = (
-        f"\nFathom's auto-generated call summary (use this to fill in details cut by truncation):\n{fathom_summary}\n"
+        f"\n\nFATHOM AI SUMMARY (this is the authoritative source -- use it for all task wording):\n{fathom_summary}\n"
         if fathom_summary else ""
     )
 
     prompt = f"""You are writing a post-call text message from Elaine to her coaching client {client_name}. Today is {today_str}.
 
-ELAINE'S BRAND VOICE (follow this exactly):
-- Warm, direct, specific, slightly sassy. Like a knowledgeable friend texting over DMs -- not a hype woman, not a medical journal.
-- She is authoritative and compassionate through PRECISION, not through enthusiasm announcements. The wins she calls out are specific (a number, a symptom, a change) not generic praise.
-- Tone sits between clinical and cheerleader. Specific like a specialist. Conversational like a trusted friend.
-- She explains the "why" in plain language: "your belly fat is an insulin problem" not "hormonal architecture issues."
-- She is direct and does not hedge. She does not perform warmth with filler phrases.
+ELAINE'S BRAND VOICE:
+- Warm, direct, specific, slightly sassy. Like a knowledgeable friend texting over DMs.
+- Authoritative through PRECISION, not enthusiasm. Wins are specific (a number, a symptom) not generic praise.
+- Explains the "why" in plain language: "your belly fat is an insulin problem" not clinical jargon.
+- BANNED: "journey", "I see you", "you deserve better", "amazing!", excessive exclamation chains, generic filler like "let me know if you have questions"
 
-WORDS AND PHRASES BANNED FOR THIS BRAND:
-- "journey" (completely banned)
-- "I see you", "you deserve better", "you're not lazy", "you've got this queen"
-- "amazing!", excessive exclamation chains, over-the-top hype language
-- Clinical terms the client has to Google: "visceral adipose tissue", "HPA axis", "phenotype"
-- Generic opener praise that could apply to anyone
-
-PREFERRED LANGUAGE (use where relevant):
-- "belly fat", "energy that lasts", "period back", "feel like yourself again", "fit into", "in control"
-- "your body is responding", "that's your hormones shifting", "here's what that means for next steps"
-- Plain mechanism explanations: "the fatigue is dropping because your cortisol load is coming down"
-
-Transcript from Elaine's coaching call with {client_name}:
+TRANSCRIPT from Elaine's coaching call with {client_name}:
 {transcript}
 {fathom_context}
-Return ONLY valid JSON, no markdown, no extra text:
+
+====
+STRICT RULES FOR client_summary:
+
+1. OPENING LINE: Start with a warm 1-sentence acknowledgment of the call -- reference the specific tone or event (e.g. "Glad we got to celebrate your wins today" or "Good connecting with you today"). Do NOT open with a stat. Do NOT open with generic "Great call today."
+
+2. WINS WITH BEFORE/AFTER: Name 1-2 specific wins using actual numbers or symptoms. If a starting point is mentioned anywhere in the transcript or Fathom summary, include it as a before/after comparison (e.g. "249lbs to 241lbs" not just "down 8lbs"). Include the real-life impact if mentioned (e.g. "fitting into your shorts easier").
+
+3. UPCOMING FOCUS: Use the EXACT focus area from the Fathom summary -- do not generalize. If Fathom says "address bloating via the Masterclass and chin breakouts via food journaling" then write that, not "dial in your nutrition."
+
+4. ACTION STEPS (bullet points with hyphens): Copy these VERBATIM from the Fathom summary's client action items. Do not paraphrase. If Fathom says "Watch the Bloating Masterclass and send 1-2 action steps by Wednesday" then write exactly that. If a link needs inserting, write [INSERT LINK]. Include specific deadlines as stated.
+
+5. BACKEND PROGRAM (if a renewal, Phase 2, or program extension was discussed): Include a brief mention connecting their stated goals to the next phase. Use internal motivation language -- help them see their own reasons for continuing, not a sales pitch. Include the specific ask (e.g. "review your budget and come prepared to discuss your options on our next call").
+
+6. CLOSE: One warm direct line. Not "let me know if you have any questions."
+
+====
+STRICT RULES FOR coach_tasks:
+- Copy these VERBATIM from the Fathom summary's "Next Steps" or coach action items section.
+- Do NOT rename resources. If Fathom says "Bloating Masterclass" do not call it "gut health guide."
+- Do NOT add tasks that are not in the Fathom summary or transcript.
+- Add {client_name}'s name if the Fathom task is generic (e.g. "Schedule follow-up call" → "Schedule follow-up call with {client_name} for [date]").
+
+====
+Return ONLY valid JSON, no markdown, no extra text. Use \\n for newlines inside strings, never literal newlines:
 {{
-  "client_summary": "A text message Elaine will send directly to {client_name}. Structure: (1) Name 1-2 specific wins from the call -- use the actual number, symptom, or change. Connect each win to what it means for progress in one sentence. (2) State the focus for the next 1-2 weeks and the plain-language reason why in 1-2 sentences. (3) List the client's action steps as bullet points using hyphens, with any deadlines stated clearly. (4) One-line warm close -- direct, not filler. Do NOT include small talk, rapport chat, or life details unless they directly explain a coaching recommendation. Do NOT open with a generic compliment. Start with the win.",
-  "coach_tasks": ["Specific task Elaine must complete, naming the client and deliverable: e.g. Send {client_name} the [resource name] link", "Schedule follow-up call with {client_name} for [date if mentioned]"],
+  "client_summary": "full text message as described above",
+  "coach_tasks": ["verbatim task from Fathom next steps with client name added"],
   "tasks_with_dates": [
     {{"task": "task description", "due_date": "YYYY-MM-DD", "due_time": "HH:MM"}}
   ]
 }}
 
-tasks_with_dates rules: ONLY include tasks where a specific date was explicitly mentioned in the call. Always use year {current_year} unless a different future year was clearly stated. Use "09:00" if no time was given. Return [] if none apply.
-coach_tasks rules: List ALL tasks Elaine needs to complete that have no specific date. Be concrete -- name the client, the resource, the link, or the deliverable. These get auto-scheduled on Elaine's calendar."""
+tasks_with_dates: ONLY tasks with an explicit date. Use year {current_year} unless stated otherwise. Use "09:00" if no time given. Return [] if none."""
 
     completion = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -428,14 +483,16 @@ def extract_name_from_title(call_title):
         return call_title.lower().split("with ")[-1].strip().title()
     return None
 
-def format_message(client_name, video_url, summary_data):
+def format_message(client_name, video_url, summary_data, fathom_summary_full=""):
     tasks = summary_data.get("coach_tasks", [])
     tasks_text = "\n".join(f"• {t}" for t in tasks) if tasks else "No tasks identified."
+    fathom_section = f"\n\n*Fathom Call Summary:*\n{fathom_summary_full}" if fathom_summary_full else ""
     return (
         f"*Client Check-In Call Summary -- {client_name}*\n"
         f"*Fathom Recording:* {video_url}\n\n"
         f"*Summary to send to client:*\n{summary_data.get('client_summary', '')}\n\n"
         f"*Elaine's post-call tasks:*\n{tasks_text}"
+        f"{fathom_section}"
     )
 
 def post_to_thread(channel_id, thread_ts, text):
@@ -451,6 +508,39 @@ def notify_fallback(text):
     channel_id = get_channel_id(FALLBACK_CHANNEL)
     if channel_id:
         post_to_thread(channel_id, None, text)
+
+def send_ghl_sms(message):
+    """Send an SMS to Elaine's phone via GoHighLevel API."""
+    if not GHL_API_KEY or not GHL_LOCATION_ID:
+        print("GHL_API_KEY or GHL_LOCATION_ID not set -- skipping SMS alert")
+        return
+    headers = {
+        "Authorization": f"Bearer {GHL_API_KEY}",
+        "Version": "2021-04-15",
+        "Content-Type": "application/json"
+    }
+    try:
+        # Look up Elaine's contact by phone number
+        search = requests.get(
+            "https://services.leadconnectorhq.com/contacts/",
+            headers=headers,
+            params={"locationId": GHL_LOCATION_ID, "query": ELAINE_PHONE}
+        )
+        print(f"GHL contact search status: {search.status_code}")
+        contacts = search.json().get("contacts", []) if search.status_code == 200 else []
+        if not contacts:
+            print(f"No GHL contact found for {ELAINE_PHONE} -- SMS not sent")
+            return
+        contact_id = contacts[0].get("id")
+        # Send outbound SMS
+        resp = requests.post(
+            "https://services.leadconnectorhq.com/conversations/messages",
+            headers=headers,
+            json={"type": "SMS", "contactId": contact_id, "message": message}
+        )
+        print(f"GHL SMS sent: {resp.status_code} -- {resp.text[:200]}")
+    except Exception as e:
+        print(f"GHL SMS error: {e}")
 
 # ── Google Calendar ────────────────────────────────────────────────────────────
 def get_next_deadline():
