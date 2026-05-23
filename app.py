@@ -172,39 +172,47 @@ def get_fathom_recording(call_title):
     headers = {"Authorization": f"Bearer {FATHOM_API_KEY}"}
 
     response = requests.get(
-        "https://api.fathom.video/v1/calls",
+        "https://api.fathom.ai/external/v1/meetings",
         headers=headers,
         params={"limit": 20}
     )
     print("Fathom status:", response.status_code)
-    print("Fathom body:", response.text[:500])
+    print("Fathom body:", response.text[:1000])
 
     if response.status_code != 200:
         return None
 
     body = response.json()
-    calls = body.get("data", body) if isinstance(body, dict) else body
+    meetings = body.get("data", body) if isinstance(body, dict) else body
 
-    for call in calls:
-        title = call.get("title", "")
+    for meeting in meetings:
+        print("Meeting fields:", json.dumps(meeting, indent=2)[:500])
+        title = meeting.get("title", "") or meeting.get("topic", "") or meeting.get("name", "")
         if call_title.lower() in title.lower() or title.lower() in call_title.lower():
-            call_id = call.get("id")
+            recording_id = meeting.get("recording_id") or meeting.get("id")
+            meeting_url = meeting.get("url") or meeting.get("share_url") or meeting.get("recording_url") or f"https://fathom.video/recordings/{recording_id}"
 
             transcript_resp = requests.get(
-                f"https://api.fathom.video/v1/calls/{call_id}/transcript",
+                f"https://api.fathom.ai/external/v1/recordings/{recording_id}/transcript",
                 headers=headers
             )
+            print("Transcript status:", transcript_resp.status_code)
+            print("Transcript body:", transcript_resp.text[:500])
+
             transcript_text = ""
             if transcript_resp.status_code == 200:
                 t_body = transcript_resp.json()
-                segments = t_body.get("segments", t_body.get("data", []))
-                transcript_text = "\n".join(
-                    f"{s.get('speaker', 'Unknown')}: {s.get('text', '')}"
-                    for s in segments
-                )
+                segments = t_body.get("segments", t_body.get("data", t_body.get("transcript", [])))
+                if isinstance(segments, list):
+                    transcript_text = "\n".join(
+                        f"{s.get('speaker', s.get('name', 'Unknown'))}: {s.get('text', s.get('content', ''))}"
+                        for s in segments
+                    )
+                elif isinstance(segments, str):
+                    transcript_text = segments
 
             return {
-                "url": call.get("url") or call.get("share_url") or f"https://fathom.video/calls/{call_id}",
+                "url": meeting_url,
                 "transcript": transcript_text,
                 "title": title,
             }
