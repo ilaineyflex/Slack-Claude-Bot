@@ -334,23 +334,47 @@ coach_tasks rules: List ALL tasks Elaine needs to complete that have no specific
     )
     raw = completion.choices[0].message.content
 
-    # Strip markdown code fences properly (re.sub on substrings, not .strip() on chars)
+    # Strip markdown code fences (re.sub on substrings, not .strip() on chars)
     text = re.sub(r'^```(?:json)?\s*\n?', '', raw.strip(), flags=re.MULTILINE)
     text = re.sub(r'\n?```\s*$', '', text, flags=re.MULTILINE).strip()
 
+    # Groq sometimes puts literal newlines inside JSON string values, which is invalid.
+    # Walk character by character and escape any newlines/tabs that occur inside strings.
+    def escape_json_strings(s):
+        result = []
+        in_string = False
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c == '"' and (i == 0 or s[i - 1] != '\\'):
+                in_string = not in_string
+                result.append(c)
+            elif in_string and c == '\n':
+                result.append('\\n')
+            elif in_string and c == '\r':
+                result.append('\\r')
+            elif in_string and c == '\t':
+                result.append('\\t')
+            else:
+                result.append(c)
+            i += 1
+        return ''.join(result)
+
+    cleaned = escape_json_strings(text)
+
     # First attempt: parse the whole cleaned string
     try:
-        return json.loads(text)
+        return json.loads(cleaned)
     except Exception:
         pass
 
     # Second attempt: extract the first {...} block in case there is surrounding text
-    json_match = re.search(r'\{[\s\S]*\}', text)
+    json_match = re.search(r'\{[\s\S]*\}', cleaned)
     if json_match:
         try:
             return json.loads(json_match.group(0))
         except Exception as e2:
-            print(f"Groq JSON extraction failed: {e2}")
+            print(f"Groq JSON extraction failed after escaping: {e2}")
 
     print(f"Groq could not parse response. First 500 chars:\n{text[:500]}")
     return {"client_summary": text, "coach_tasks": [], "tasks_with_dates": []}
