@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytz
 import requests
-import google.generativeai as genai
+from google import genai
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request
 from google.oauth2 import service_account
@@ -22,7 +22,7 @@ TIMEZONE           = os.environ.get("TIMEZONE", "America/Los_Angeles")
 
 # ── Initialize ────────────────────────────────────────────────────────────────
 app = Flask(__name__)
-genai.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
 scheduler.start()
 
@@ -214,7 +214,6 @@ def get_fathom_recording(call_title):
 
 # ── Gemini Summary ────────────────────────────────────────────────────────────
 def generate_summary(transcript, client_name):
-    model = genai.GenerativeModel("gemini-1.5-flash")
     prompt = f"""You are an assistant helping a fitness coach named Elaine organize client call notes.
 
 Transcript from a coaching call with {client_name}:
@@ -232,7 +231,10 @@ Return ONLY valid JSON with no extra text or markdown:
 
 Only include items in tasks_with_dates if a specific date was mentioned in the transcript. If no time was mentioned use 09:00. If none apply return an empty array."""
 
-    response = model.generate_content(prompt)
+    response = gemini_client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
     text = response.text.strip().strip("```").strip("json").strip()
 
     try:
