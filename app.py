@@ -11,14 +11,14 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SLACK_BOT_TOKEN       = os.environ.get("SLACK_BOT_TOKEN", "")
-FATHOM_API_KEY        = os.environ.get("FATHOM_API_KEY", "")
-GEMINI_API_KEY        = os.environ.get("GEMINI_API_KEY", "")
-GOOGLE_CREDENTIALS    = os.environ.get("GOOGLE_CREDENTIALS", "")
-ELAINE_CALENDAR_ID    = os.environ.get("ELAINE_CALENDAR_ID", "")
-ROSTER_CHANNEL        = os.environ.get("ROSTER_CHANNEL", "elaine-roster")
-FALLBACK_CHANNEL      = os.environ.get("FALLBACK_CHANNEL", "ceo-braindump")
-TIMEZONE              = os.environ.get("TIMEZONE", "America/Los_Angeles")
+SLACK_BOT_TOKEN    = os.environ.get("SLACK_BOT_TOKEN", "")
+FATHOM_API_KEY     = os.environ.get("FATHOM_API_KEY", "")
+GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY", "")
+GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
+ELAINE_CALENDAR_ID = os.environ.get("ELAINE_CALENDAR_ID", "")
+ROSTER_CHANNEL     = os.environ.get("ROSTER_CHANNEL", "elaine-roster")
+FALLBACK_CHANNEL   = os.environ.get("FALLBACK_CHANNEL", "ceo-braindump")
+TIMEZONE           = os.environ.get("TIMEZONE", "America/Los_Angeles")
 
 # ── Initialize ────────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -52,9 +52,10 @@ def ghl_webhook():
     data = request.json
     print("GHL webhook received:", json.dumps(data, indent=2))
 
-     appointment_title = data.get("calendar", {}).get("title", "")
+    appointment_title = data.get("calendar", {}).get("title", "")
     client_name = data.get("full_name", "") or data.get("contact", {}).get("full_name", "")
     end_time_str = data.get("calendar", {}).get("endTime", "")
+
     print(f"Title: {appointment_title} | Client: {client_name} | End: {end_time_str}")
 
     if "Client Check-In Call" not in appointment_title:
@@ -87,25 +88,20 @@ def ghl_webhook():
 def run_post_call_automation(client_name, call_title):
     print(f"\n=== Post-call automation: {client_name} ===")
 
-    # Step 1: Get Fathom transcript
     fathom_data = get_fathom_recording(call_title)
     if not fathom_data:
         notify_fallback(f"Could not find Fathom recording for: *{call_title}*. Please check manually.")
         return
 
-    # Step 2: Generate summary
     summary_data = generate_summary(fathom_data["transcript"], client_name)
 
-    # Step 3: Find client thread in #elaine-roster
     thread_result = find_client_thread(client_name)
     if not thread_result:
-        # Try extracting name from calendar title as backup
         name_from_title = extract_name_from_title(call_title)
         if name_from_title:
             print(f"Trying name from title: {name_from_title}")
             thread_result = find_client_thread(name_from_title)
 
-    # Step 4: Format and post message
     message = format_message(client_name, fathom_data["url"], summary_data)
 
     if thread_result:
@@ -120,7 +116,6 @@ def run_post_call_automation(client_name, call_title):
         notify_fallback(alert)
         print("No thread found, posted to fallback channel.")
 
-    # Step 5: Create Google Calendar tasks
     if summary_data.get("tasks_with_dates"):
         create_calendar_tasks(summary_data["tasks_with_dates"])
 
@@ -178,7 +173,7 @@ Transcript from a coaching call with {client_name}:
 
 {transcript}
 
-Return ONLY valid JSON in this exact format with no extra text or markdown:
+Return ONLY valid JSON with no extra text or markdown:
 {{
   "client_summary": "Bullet point summary Elaine can copy and send directly to the client. Include key discussion points and any action steps the CLIENT needs to take. Write as if speaking directly to the client.",
   "coach_tasks": ["Task 1 for Elaine", "Task 2 for Elaine"],
