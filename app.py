@@ -183,6 +183,24 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
                 )
         return
 
+    # Derive call date for post headers
+    tz = pytz.timezone(TIMEZONE)
+    call_date = ""
+    if end_time_iso:
+        try:
+            dt = datetime.fromisoformat(end_time_iso).astimezone(tz)
+            call_date = f"{dt.strftime('%B')} {dt.day}, {dt.year}"
+        except Exception:
+            pass
+    if not call_date:
+        # Extract month/day from call title (e.g. "May 21st", "May 22")
+        m = re.search(
+            r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d+',
+            call_title, re.IGNORECASE
+        )
+        if m:
+            call_date = f"{m.group(0)}, {datetime.now(tz).year}"
+
     summary_data = generate_summary(
         fathom_data["transcript"],
         client_name,
@@ -196,21 +214,34 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
         if name_from_title:
             thread_result = find_client_thread(name_from_title)
 
-    message = format_message(
-        client_name,
-        fathom_data["url"],
-        summary_data,
-        fathom_summary_full=fathom_data.get("fathom_summary_full", "")
-    )
+    video_url = fathom_data["url"]
+    fathom_full = fathom_data.get("fathom_summary_full", "")
+    date_str = f" {call_date}" if call_date else ""
+    post_header = f"*Client Check-In Call Summary{date_str} -- {client_name}*\n*Fathom Recording:* {video_url}\n\n"
+
+    # Post 1: summary to send to client
+    post1 = post_header + f"*Summary to send to client:*\n{summary_data.get('client_summary', '')}"
+
+    # Post 2: Elaine's post-call tasks (use - dashes for readability)
+    tasks = summary_data.get("coach_tasks", [])
+    tasks_text = "\n".join(f"- {t}" for t in tasks) if tasks else "No tasks identified."
+    post2 = post_header + f"*Elaine's post-call tasks:*\n{tasks_text}"
+
+    # Post 3: full Fathom summary (only when available)
+    post3 = (post_header + f"*Fathom Call Summary:*\n{fathom_full}") if fathom_full else None
 
     if thread_result:
         channel_id, thread_ts = thread_result
-        post_to_thread(channel_id, thread_ts, message)
-        print("Posted to client thread successfully.")
+        post_to_thread(channel_id, thread_ts, post1)
+        post_to_thread(channel_id, thread_ts, post2)
+        if post3:
+            post_to_thread(channel_id, thread_ts, post3)
+        print("Posted 3-part summary to client thread successfully.")
     else:
+        combined = post1 + "\n\n" + post2 + ("\n\n" + post3 if post3 else "")
         alert = (
             f"Could not find a thread for *{client_name}* in #elaine-roster. "
-            f"Please post this manually.\n\n{message}"
+            f"Please post this manually.\n\n{combined}"
         )
         notify_fallback(alert)
         print("No thread found, posted to fallback channel.")
@@ -283,12 +314,24 @@ def get_fathom_recording(call_title, client_name=""):
         print(f"Fathom summary endpoint status: {summary_resp.status_code}")
         if summary_resp.status_code == 200:
             s_body = summary_resp.json()
-            for field in ["summary", "text", "content", "ai_summary", "notes"]:
-                val = s_body.get(field) if isinstance(s_body, dict) else None
-                if val and isinstance(val, str) and len(val) > 50:
-                    fathom_summary_raw = val
-                    print(f"Fathom summary found at endpoint field '{field}'")
-                    break
+            if isinstance(s_body, dict):
+                # Fathom API format: {"summary": {"markdown_formatted": "...", "template_name": "..."}}
+                nested = s_body.get("summary")
+                if isinstance(nested, dict):
+                    val = nested.get("markdown_formatted") or nested.get("text") or nested.get("content")
+                    if val and isinstance(val, str) and len(val) > 50:
+                        fathom_summary_raw = val
+                        print(f"Fathom summary found at summary.markdown_formatted ({len(val)} chars)")
+                # Fallback: top-level string fields
+                if not fathom_summary_raw:
+                    for field in ["text", "content", "ai_summary", "notes", "markdown_formatted"]:
+                        val = s_body.get(field)
+                        if val and isinstance(val, str) and len(val) > 50:
+                            fathom_summary_raw = val
+                            print(f"Fathom summary found at top-level field '{field}'")
+                            break
+            if not fathom_summary_raw:
+                print(f"Fathom summary response shape: {list(s_body.keys()) if isinstance(s_body, dict) else type(s_body)}")
 
     # Full summary for display in Slack; AI gets a slightly shorter version if very long
     fathom_summary_full = fathom_summary_raw
@@ -336,51 +379,50 @@ def generate_summary(transcript, client_name, fathom_summary=""):
         if fathom_summary else ""
     )
 
-    prompt = f"""You are writing a post-call text message from Elaine to her coaching client {client_name}. Today is {today_str}.
+    prompt = f"""You are writing post-call notes from Elaine, a PCOS fitness coach, to her client {client_name}. Today is {today_str}.
 
-ELAINE'S BRAND VOICE:
-- Warm, direct, specific, slightly sassy. Like a knowledgeable friend texting over DMs.
-- Authoritative through PRECISION, not enthusiasm. Wins are specific (a number, a symptom) not generic praise.
-- Explains the "why" in plain language: "your belly fat is an insulin problem" not clinical jargon.
-- BANNED: "journey", "I see you", "you deserve better", "amazing!", excessive exclamation chains, generic filler like "let me know if you have questions"
+THE FATHOM SUMMARY BELOW IS YOUR ONLY SOURCE OF TRUTH. Do not add topics, tasks, or context that do not appear in it.
 
-TRANSCRIPT from Elaine's coaching call with {client_name}:
+TRANSCRIPT (for tone and direct quotes only):
 {transcript}
 {fathom_context}
 
 ====
-STRICT RULES FOR client_summary:
+TASK 1 — client_summary (a text message Elaine will send to {client_name}):
 
-1. OPENING LINE: Start with a warm 1-sentence acknowledgment of the call -- reference the specific tone or event (e.g. "Glad we got to celebrate your wins today" or "Good connecting with you today"). Do NOT open with a stat. Do NOT open with generic "Great call today."
+STRUCTURE (follow in order, no deviations):
 
-2. WINS WITH BEFORE/AFTER: Name 1-2 specific wins using actual numbers or symptoms. If a starting point is mentioned anywhere in the transcript or Fathom summary, include it as a before/after comparison (e.g. "249lbs to 241lbs" not just "down 8lbs"). Include the real-life impact if mentioned (e.g. "fitting into your shorts easier").
+A. OPENING — 1 sentence. Warm and specific to THIS call's tone. Reference something that actually happened (e.g. "Glad we got to celebrate your wins today" if wins were discussed, or "Good catching up with you, {client_name}" if it was a general check-in). Use their first name. Never use "Good connecting with you today" as a generic opener.
 
-3. UPCOMING FOCUS: Use the EXACT focus area from the Fathom summary -- do not generalize. If Fathom says "address bloating via the Masterclass and chin breakouts via food journaling" then write that, not "dial in your nutrition."
+B. WINS — Name 1-2 specific measurable wins from the Fathom Key Takeaways. ALWAYS use before → after format if a starting number is mentioned anywhere (e.g. "249lbs → 241lbs", not just "down 8lbs"). Include the real-life impact if mentioned (e.g. "fitting into your shorts easier"). A touch of warmth is ok here ("woo!", ":)") but keep it brief.
 
-4. ACTION STEPS (bullet points with hyphens): Copy these VERBATIM from the Fathom summary's client action items. Do not paraphrase. If Fathom says "Watch the Bloating Masterclass and send 1-2 action steps by Wednesday" then write exactly that. If a link needs inserting, write [INSERT LINK]. Include specific deadlines as stated.
+C. UPCOMING FOCUS — 1-2 sentences. Copy the exact focus from the Fathom summary's "New Focus" or equivalent section. Do not generalize. Do not invent focus areas.
 
-5. BACKEND PROGRAM (if a renewal, Phase 2, or program extension was discussed): Include a brief mention connecting their stated goals to the next phase. Use internal motivation language -- help them see their own reasons for continuing, not a sales pitch. Include the specific ask (e.g. "review your budget and come prepared to discuss your options on our next call").
+D. CLIENT ACTION STEPS — bullet list using hyphens. Copy VERBATIM from the "Next Steps - {client_name}" section of the Fathom summary. Do not paraphrase. Do not add steps not in Fathom. If a link is mentioned, write [INSERT LINK]. Include deadlines exactly as stated.
 
-6. CLOSE: One warm direct line. Not "let me know if you have any questions."
+E. PROGRAM RENEWAL / PHASE 2 — ONLY include this section if Fathom's Topics explicitly contains a renewal, Phase 2, or continuation discussion for THIS client. If it does, write 1-2 sentences connecting their stated goals to the next phase (internal motivation, not a sales pitch), plus the specific action ask (e.g. "review your finances and come prepared to discuss your options"). If no renewal was discussed, SKIP THIS SECTION ENTIRELY.
+
+F. CLOSE — 1 warm direct line. Not "let me know if you have any questions."
 
 ====
-STRICT RULES FOR coach_tasks:
-- Copy these VERBATIM from the Fathom summary's "Next Steps" or coach action items section.
-- Do NOT rename resources. If Fathom says "Bloating Masterclass" do not call it "gut health guide."
-- Do NOT add tasks that are not in the Fathom summary or transcript.
-- Add {client_name}'s name if the Fathom task is generic (e.g. "Schedule follow-up call" → "Schedule follow-up call with {client_name} for [date]").
+TASK 2 — coach_tasks (Elaine's to-do list):
+
+- Copy VERBATIM from the "Next Steps - Elaine" (or equivalent coach section) of the Fathom summary.
+- If the task doesn't name the client, add {client_name}'s name (e.g. "Schedule follow-up call" → "Schedule follow-up call with {client_name} for [date if mentioned]").
+- Do NOT rename any resources. If Fathom says "Bloating Masterclass", write "Bloating Masterclass". If Fathom says "hormonal health assessment forms", write that exactly.
+- Do NOT add, remove, or invent tasks. Include every task Fathom listed.
 
 ====
 Return ONLY valid JSON, no markdown, no extra text. Use \\n for newlines inside strings, never literal newlines:
 {{
-  "client_summary": "full text message as described above",
-  "coach_tasks": ["verbatim task from Fathom next steps with client name added"],
+  "client_summary": "full structured text message for {client_name}",
+  "coach_tasks": ["verbatim task 1 from Fathom with {client_name} added where generic", "verbatim task 2"],
   "tasks_with_dates": [
     {{"task": "task description", "due_date": "YYYY-MM-DD", "due_time": "HH:MM"}}
   ]
 }}
 
-tasks_with_dates: ONLY tasks with an explicit date. Use year {current_year} unless stated otherwise. Use "09:00" if no time given. Return [] if none."""
+tasks_with_dates: ONLY tasks where a specific date was explicitly stated. Use year {current_year} unless stated otherwise. Use "09:00" if no time given. Return [] if none."""
 
     completion = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
