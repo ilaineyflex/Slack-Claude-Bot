@@ -332,13 +332,28 @@ coach_tasks rules: List ALL tasks Elaine needs to complete that have no specific
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
-    text = completion.choices[0].message.content.strip().strip("```").strip("json").strip()
+    raw = completion.choices[0].message.content
 
+    # Strip markdown code fences properly (re.sub on substrings, not .strip() on chars)
+    text = re.sub(r'^```(?:json)?\s*\n?', '', raw.strip(), flags=re.MULTILINE)
+    text = re.sub(r'\n?```\s*$', '', text, flags=re.MULTILINE).strip()
+
+    # First attempt: parse the whole cleaned string
     try:
         return json.loads(text)
-    except Exception as e:
-        print(f"Groq parse error: {e}\nRaw: {text}")
-        return {"client_summary": text, "coach_tasks": [], "tasks_with_dates": []}
+    except Exception:
+        pass
+
+    # Second attempt: extract the first {...} block in case there is surrounding text
+    json_match = re.search(r'\{[\s\S]*\}', text)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except Exception as e2:
+            print(f"Groq JSON extraction failed: {e2}")
+
+    print(f"Groq could not parse response. First 500 chars:\n{text[:500]}")
+    return {"client_summary": text, "coach_tasks": [], "tasks_with_dates": []}
 
 # ── Slack Helpers ─────────────────────────────────────────────────────────────
 def get_channel_id(channel_name):
