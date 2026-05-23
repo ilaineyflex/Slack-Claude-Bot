@@ -256,11 +256,13 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
 
 # ── Fathom helpers ────────────────────────────────────────────────────────────
 def _fathom_clean_display(text):
-    """Prepare Fathom markdown for Slack: strip hyperlinks, convert headers to bold."""
+    """Prepare Fathom markdown for Slack: strip hyperlinks, convert markdown bold to Slack bold."""
     if not text:
         return text
     # [link text](url) → link text  (removes every embedded timestamp URL)
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # **bold** → *bold*  (Slack uses single asterisk for bold, not double)
+    text = re.sub(r'\*\*([^*\n]+)\*\*', r'*\1*', text)
     # ## Heading / ### Heading → *Heading*  (Slack bold instead of markdown headers)
     text = re.sub(r'^#{1,4}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
     return text
