@@ -138,6 +138,17 @@ def _extract_lead_name(title):
 # ── Main Automation ───────────────────────────────────────────────────────────
 def run_sales_call_automation(lead_name, call_title, end_time_iso=None,
                                attempt=1, thread_ts_override=None):
+    try:
+        _run_sales_call_automation_inner(lead_name, call_title, end_time_iso,
+                                         attempt, thread_ts_override)
+    except Exception as e:
+        import traceback
+        print(f"[FATAL] Sales call automation crashed for {lead_name}: {e}")
+        traceback.print_exc()
+
+
+def _run_sales_call_automation_inner(lead_name, call_title, end_time_iso=None,
+                                      attempt=1, thread_ts_override=None):
     print(f"\n=== Sales call automation: {lead_name} (attempt {attempt}/{len(RETRY_DELAYS)}) ===")
 
     fathom_data = _get_fathom_recording(call_title, lead_name)
@@ -464,7 +475,8 @@ def _fathom_clean_ai(text):
 
 def _get_fathom_recording(call_title, lead_name=""):
     headers  = {"X-Api-Key": FATHOM_API_KEY}
-    response = requests.get("https://api.fathom.ai/external/v1/meetings", headers=headers)
+    response = requests.get("https://api.fathom.ai/external/v1/meetings",
+                            headers=headers, timeout=30)
     print(f"Fathom status: {response.status_code}")
     if response.status_code != 200:
         print(f"Fathom error: {response.text[:500]}")
@@ -509,7 +521,7 @@ def _get_fathom_recording(call_title, lead_name=""):
     if not fathom_summary_raw:
         summary_resp = requests.get(
             f"https://api.fathom.ai/external/v1/recordings/{recording_id}/summary",
-            headers=headers
+            headers=headers, timeout=30
         )
         if summary_resp.status_code == 200:
             s_body = summary_resp.json()
@@ -529,7 +541,7 @@ def _get_fathom_recording(call_title, lead_name=""):
     # Transcript
     transcript_resp = requests.get(
         f"https://api.fathom.ai/external/v1/recordings/{recording_id}/transcript",
-        headers=headers
+        headers=headers, timeout=30
     )
     transcript_text = ""
     if transcript_resp.status_code == 200:
@@ -567,7 +579,7 @@ def _find_bookedsets_thread(lead_name):
         if cursor:
             params["cursor"] = cursor
         resp     = requests.get("https://slack.com/api/conversations.history",
-                                headers=headers, params=params)
+                                headers=headers, params=params, timeout=15)
         body     = resp.json()
         messages = body.get("messages", [])
 
@@ -592,7 +604,8 @@ def _build_thread_info(thread_ts):
     resp     = requests.get(
         "https://slack.com/api/conversations.replies",
         headers=headers,
-        params={"channel": BOOKEDSETS_CHANNEL, "ts": thread_ts, "limit": 50}
+        params={"channel": BOOKEDSETS_CHANNEL, "ts": thread_ts, "limit": 50},
+        timeout=15
     )
     messages           = resp.json().get("messages", [])
     setter_id, s_name  = _extract_setter(messages)
@@ -632,7 +645,7 @@ def _post(channel_id, thread_ts, text):
     if thread_ts:
         payload["thread_ts"] = thread_ts
     resp = requests.post("https://slack.com/api/chat.postMessage",
-                         headers=headers, json=payload)
+                         headers=headers, json=payload, timeout=15)
     result = resp.json()
     if not result.get("ok"):
         print(f"Slack post error: {result.get('error','unknown')}")
@@ -650,7 +663,8 @@ def _get_channel_id(channel_name):
     resp = requests.get(
         "https://slack.com/api/conversations.list",
         headers=headers,
-        params={"types": "private_channel,public_channel", "limit": 200}
+        params={"types": "private_channel,public_channel", "limit": 200},
+        timeout=15
     )
     for ch in resp.json().get("channels", []):
         if ch["name"] == channel_name:
