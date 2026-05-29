@@ -42,7 +42,7 @@ _SELLING_FILES = [
 ]
 
 # ── Brand doc loading ─────────────────────────────────────────────────────────
-_BRAND_DOCS: dict[str, str] = {}
+_BRAND_DOCS = {}  # type: dict
 
 def _load_brand_docs():
     if not os.path.exists(BRAND_DOCS_DIR):
