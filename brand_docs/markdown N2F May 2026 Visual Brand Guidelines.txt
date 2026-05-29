@@ -1,0 +1,910 @@
+# NEW TO FITNESS  
+## VISUAL BRAND GUIDELINES  
+### Updated Carousel Branding & Layout System  
+For @ilaineyflex + Soft Life Health Co.
+
+---
+
+# BRAND POSITIONING
+
+New To Fitness is a luxury feminine hormone-health education and coaching brand built for ambitious women navigating PCOS/PMOS, insulin resistance, pre-diabetes, hormonal imbalances, weight loss, fertility, and lifestyle optimization.
+
+The visual identity should feel like:
+
+- luxury editorial wellness
+- emotionally intelligent strategy
+- soft feminine authority
+- calm confidence
+- premium but approachable
+- Vogue wellness meets hormone strategist notebook
+- elevated best-friend energy
+- emotionally safe but highly specific
+
+The brand should NEVER feel:
+
+- overly clinical
+- generic wellness coaching
+- loud fitness influencer
+- crowded educational Canva templates
+- hyper-motivational
+- chaotic or “girlboss hustle”
+
+---
+
+# CORE DESIGN PHILOSOPHY
+
+The content is designed for ambitious women who:
+- already care about their health
+- already invest in themselves
+- are intelligent and emotionally aware
+- are overwhelmed by conflicting advice
+- want clarity, personalization, and structure
+- resonate with soft luxury and emotionally intelligent authority
+
+Every design should make the viewer think:
+
+> “This feels like it was made specifically for me.”
+
+---
+
+# CONTENT STRUCTURE SYSTEM
+
+All content follows the PRISM framework.
+
+## P = Pattern Interrupt
+Disrupts the viewer’s current belief or scrolling behavior.
+
+## R = Reframe
+Explains why previous approaches have not worked.
+
+## I = Identity Mirror
+Makes the viewer feel emotionally seen.
+
+## S = System Authority
+Introduces a personalized hormone-first framework.
+
+## M = Momentum
+Creates movement toward action, saves, follows, comments, or DMs.
+
+---
+
+# INSTAGRAM CAROUSEL SYSTEM
+
+## MASTER FORMAT
+
+Carousel Size:
+- 1080 x 1350 px (4:5)
+
+All critical information MUST fit inside a centered 1080 x 1080 safe zone for YouTube reposting.
+
+---
+
+# SAFE ZONE RULES
+
+## SAFE INSIDE 1:1 FRAME
+These elements MUST remain inside the centered square:
+
+- headers
+- body text
+- diagrams
+- educational visuals
+- CTA text
+- arrows
+- annotations
+- framework explanations
+
+## OUTSIDE SAFE ZONE
+These elements MAY sit outside the square crop:
+
+- logo
+- page numbers
+- social handles
+- decorative accents
+- texture overflow
+
+---
+
+# LAYOUT STRUCTURE
+
+## TOP MARGIN
+120-140 px
+
+## SIDE MARGINS
+100-120 px
+
+## BOTTOM MARGIN
+140-170 px
+
+The brand uses oversized whitespace intentionally.
+
+Whitespace signals:
+- confidence
+- luxury
+- emotional regulation
+- readability
+- authority
+
+---
+
+# TEXT DENSITY RULES
+
+The content should NEVER feel visually overwhelming.
+
+## Maximum Recommended Word Counts
+
+### Cover Slides
+5-14 words
+
+### Educational Slides
+20-45 words
+
+### Framework Slides
+10-30 words
+
+### Storytelling Slides
+25-55 words
+
+### CTA Slides
+8-25 words
+
+---
+
+# GOLDEN RULE
+
+One core idea per slide.
+
+Do NOT stack:
+- multiple lessons
+- multiple mechanisms
+- multiple transformations
+
+Each slide should feel:
+- skimmable in 2 seconds
+- understandable in 5 seconds
+- save-worthy in 10 seconds
+
+---
+
+# VISUAL RHYTHM SYSTEM
+
+Slides should NOT all feel visually identical.
+
+The carousel pacing should alternate between:
+- bold typography slides
+- diagrams
+- emotional photography
+- frameworks
+- handwritten annotations
+- clean educational layouts
+
+---
+
+# IDEAL CAROUSEL FLOW
+
+## Slide 1
+Pattern interrupt cover
+
+## Slide 2
+Emotional reframe
+
+## Slide 3
+Biological explanation
+
+## Slide 4
+Framework or diagram
+
+## Slide 5
+Identity mirror
+
+## Slide 6
+System explanation
+
+## Slide 7
+Lifestyle or implementation
+
+## Slide 8
+Outcome visualization
+
+## Slide 9
+CTA
+
+---
+
+# COLOR SYSTEM
+
+## PRIMARY PALETTE  
+### “Bordeaux Ambition”
+
+This palette combines:
+- luxury wine tones
+- warm editorial creams
+- saturated gold
+- dark chocolate neutrals
+
+The palette should feel:
+- expensive
+- feminine
+- intelligent
+- warm
+- editorial
+- timeless
+
+---
+
+# PRIMARY COLORS
+
+## Saturated Wine
+HEX: #7A0013
+
+Use for:
+- primary accents
+- emphasis words
+- cover slide elements
+- emotional statements
+- CTA emphasis
+
+---
+
+## Warm Luxury Gold
+HEX: #D4A347
+
+Use for:
+- highlights
+- divider lines
+- premium accents
+- icons
+- framework emphasis
+
+---
+
+## Chocolate Brown
+HEX: #2B1B18
+
+Use for:
+- body copy
+- educational text
+- diagrams
+- authority statements
+
+---
+
+## Warm Charcoal
+HEX: #1E1A1A
+
+Use for:
+- dark backgrounds
+- luxury contrast
+- photography overlays
+
+---
+
+## Vintage Cream
+HEX: #faf5ef
+
+Use for:
+- primary backgrounds
+- educational slides
+- framework pages
+
+---
+
+## Soft Editorial Ivory
+HEX: #F8F4EF
+
+Use for:
+- alternate light backgrounds
+- soft texture slides
+- spacious layouts
+
+---
+
+# COLOR USAGE RULES
+
+## DO:
+- use cream backgrounds often
+- use wine selectively for emotional emphasis
+- keep gold intentional and sparse
+- maintain strong contrast
+- preserve readability
+
+## DO NOT:
+- oversaturate slides
+- use neon colors
+- use cool-toned blues
+- use random pastel palettes
+- use harsh black on cream when dark brown works better
+
+---
+
+# TYPOGRAPHY SYSTEM
+
+The typography system should feel:
+- editorial
+- feminine
+- premium
+- intelligent
+- emotionally layered
+
+---
+
+# FONT SYSTEM
+
+## HEADER FONT
+### Satoshi Bold
+
+Use for:
+- major headlines
+- hook statements
+- authority slides
+
+Weights:
+- Bold
+- Black
+
+Size:
+- 70-110 px
+
+Color:
+- chocolate brown
+- ivory on dark backgrounds
+
+Style:
+- oversized
+- spacious
+- minimal punctuation
+
+---
+
+## SUBHEADER FONT
+### Cormorant Garamond Italic
+
+Use for:
+- emotional contrast
+- feminine emphasis
+- identity mirror moments
+
+Weights:
+- SemiBold Italic
+- Bold Italic
+
+Size:
+- 42-72 px
+
+Color:
+- wine
+- warm gold
+- dark brown
+
+---
+
+## BODY FONT
+### Satoshi Medium
+
+Use for:
+- educational copy
+- frameworks
+- biology explanations
+- captions inside slides
+
+Weights:
+- Medium
+- Regular
+
+Size:
+- 30-52 px
+
+Line Height:
+- 1.2-1.4
+
+Maximum:
+- 3-5 lines per block
+
+---
+
+## HANDWRITTEN ACCENT FONT
+### Caveat / Brittany Signature
+
+Use for:
+- annotations
+- arrows
+- notes
+- emotional emphasis
+- diagram labels
+
+Size:
+- 22-38 px
+
+Color:
+- gold
+- wine
+- muted charcoal
+
+---
+
+# TYPOGRAPHY RULES
+
+## DO:
+- create hierarchy through size
+- leave breathing room
+- use serif italics sparingly
+- isolate key phrases
+- keep text highly readable
+
+## DO NOT:
+- use more than 2-3 font styles per slide
+- overcrowd text
+- center every paragraph
+- use tiny text
+- stack too many emphasis styles
+
+---
+
+# BACKGROUND SYSTEM
+
+The brand relies heavily on:
+- warmth
+- subtle texture
+- editorial minimalism
+
+---
+
+# APPROVED BACKGROUNDS
+
+## Type 1: Editorial Cream
+
+Use for:
+- education
+- frameworks
+- diagrams
+
+Features:
+- subtle grain
+- warm paper texture
+- low visual noise
+
+---
+
+## Type 2: Bordeaux Luxury
+
+Use for:
+- covers
+- CTA slides
+- emotional storytelling
+
+Features:
+- dark wine tones
+- dramatic contrast
+- cream typography
+
+---
+
+## Type 3: Lifestyle Photography
+
+Use for:
+- identity mirror slides
+- storytelling
+- transformation moments
+
+Photography should feel:
+- candid
+- feminine
+- cinematic
+- natural light
+- soft shadows
+- warm tones
+
+---
+
+# IMAGERY SYSTEM
+
+Images should support the message.
+
+NOT overpower it.
+
+---
+
+# IMAGE STYLE
+
+Preferred imagery:
+- cozy home environments
+- luxury cafes
+- feminine office spaces
+- wellness rituals
+- meal prep
+- soft gym aesthetics
+- real-life moments
+- editorial lifestyle photography
+
+---
+
+# IMAGE POSITIONING RULES
+
+## Full Bleed Images
+Only when:
+- emotional storytelling
+- transformation
+- identity mirror
+
+Text overlay should occupy:
+- 25-40% max
+
+---
+
+## Inserted Images
+Use:
+- screenshots
+- diagrams
+- frameworks
+- meal examples
+- proof visuals
+
+Style:
+- scrapbook/editorial
+- slightly tilted
+- taped/pinned aesthetic
+
+---
+
+# BOX & SHAPE SYSTEM
+
+The brand uses boxes to:
+- isolate ideas
+- reduce overwhelm
+- direct attention
+
+---
+
+# APPROVED BOX STYLES
+
+## Soft Editorial Boxes
+
+Features:
+- rounded corners
+- translucent fills
+- subtle shadow
+- warm ivory tones
+
+Use:
+- quotes
+- key insights
+- explanations
+
+---
+
+## Hand-Drawn Shapes
+
+Features:
+- imperfect marker feel
+- asymmetrical
+- sketch-like
+
+Use:
+- highlights
+- CTA emphasis
+- arrows
+- emotional callouts
+
+---
+
+# GRAPHIC SYSTEM
+
+Graphics should feel:
+- educational
+- simple
+- premium
+- emotionally light
+
+Preferred:
+- venn diagrams
+- arrows
+- timelines
+- comparison layouts
+- circles
+- framework visuals
+
+Avoid:
+- busy infographics
+- excessive icons
+- corporate-style graphics
+
+---
+
+# SPACING SYSTEM
+
+Spacing is a luxury signal.
+
+Slides should feel:
+- breathable
+- intentional
+- emotionally calm
+
+---
+
+# SPACING RULES
+
+## Paragraph Spacing
+50-100 px between sections
+
+## Header to Body
+40-80 px
+
+## Visual Breathing Room
+Always leave empty space around diagrams and key points.
+
+---
+
+# THE 60/40 RULE
+
+Approximately:
+- 60% whitespace
+- 40% content
+
+---
+
+# CTA SYSTEM
+
+CTA slides should feel:
+- calm
+- direct
+- emotionally decisive
+
+NOT:
+- desperate
+- loud
+- overexplained
+
+---
+
+# CTA STRUCTURE
+
+Best practices:
+- one action
+- one keyword
+- one clear benefit
+
+Examples:
+- COMMENT “GUIDE”
+- SAVE THIS FOR YOUR NEXT GROCERY RUN
+- FOLLOW FOR HORMONE-FIRST WEIGHT LOSS TIPS
+
+---
+
+# BRAND VOICE
+
+The visual tone must align with the verbal tone.
+
+The brand voice is:
+
+- intelligent
+- emotionally aware
+- warm
+- strategic
+- feminine
+- culturally aware
+- specific
+- premium
+- non-generic
+
+---
+
+# WRITING STYLE RULES
+
+## DO:
+- use specific biology explanations
+- explain WHY the viewer should care
+- connect mechanisms to real symptoms
+- make ambitious women feel seen
+- use emotionally intelligent phrasing
+
+## DO NOT:
+- use vague wellness language
+- use “heal your body naturally” type phrasing
+- use deficit-heavy fitness culture language
+- sound clinical or robotic
+
+---
+
+# CONTENT SHOULD FEEL LIKE:
+
+> “a luxury hormone strategist’s private notebook mixed with a Vogue wellness editorial.”
+
+NOT:
+- fitness influencer content
+- generic health coaching
+- Pinterest quote slides
+- loud wellness marketing
+
+---
+
+# REFERENCE DESIGN STYLES ANALYZED
+
+The updated system incorporates:
+- oversized whitespace
+- editorial typography
+- scrapbook annotations
+- handwritten accents
+- emotional photography
+- clean framework layouts
+- minimalist educational pacing
+- structured hierarchy
+- luxury calm visual rhythm
+
+Inspired by:
+- editorial strategy carousels
+- feminine business education pages
+- luxury wellness brands
+- emotionally intelligent storytelling formats
+
+---
+
+# FINAL NON-NEGOTIABLE RULES
+
+## ALWAYS:
+- prioritize readability
+- design for saves
+- keep emotional pacing intentional
+- fit critical content inside 1:1 safe zone
+- maintain hierarchy
+- use asymmetry
+- preserve whitespace
+
+## NEVER:
+- overcrowd slides
+- use tiny fonts
+- use random colors
+- overuse emojis
+- overexplain on one slide
+- visually overwhelm the viewer
+
+---
+
+# FINAL CREATIVE DIRECTION
+
+The New To Fitness visual system should feel like:
+
+> “the private strategy notes of a luxury hormone coach for ambitious women.”
+
+The viewer should feel:
+- emotionally understood
+- intellectually respected
+- visually calm
+- aspirational
+- confident that the brand understands their specific experience
+
+Every design decision should reinforce:
+- premium positioning
+- emotional specificity
+- strategic intelligence
+- feminine authority
+- hormone-first methodology
+
+---
+
+brand voice:
+yes we want the brand voice to be strategic, specific and identity-respecting but it should be outcome focused and identity-first above all else prioritizing the results a premium buyer who has no problem investing so long as they are confident that our program can get them results. plan should be used in more casual sentences while protocol is used when speaking about our method. so instead "the tools you're using were built for a woman with a different biology, when you needed a hormone-first approach built specifically for your body and schedule to help restore your energy" (but phrased better and more concisely for our premium buyer using more of their identity). additionally we describe common states of being like "burnout" by giving a common scenario like them getting work done, holding emotional space for everyone then coming home with no energy left to even crack an egg. it gives them a "that's so me" feeling and makes them feel understood without us needing to blankly state the overused term of burnout
+
+--- type-display header:
+the header font should be a bold font like montserrat bold to extra bold and the header statement needs to be layered like the example in the attached picture which used these instructions that were extracted from canva but we used montserrat instead of league spartan and center justified the text. override any formatting decisions from the below instructions with the final product that is presented in the picture as needed: Canva setup
+Create a 9:16 design
+Instagram Story or Reel cover size.
+Add your background image.
+Darken the image slightly:
+Edit photo → Adjust
+Brightness: -20
+Contrast: +10
+Shadows: -20
+Saturation: -5
+Add the small top text
+Text: let’s be real,
+Font: League Spartan Medium or Montserrat Medium
+Size: around 42–55
+Color: #FFF2EA
+Position it slightly above the big word “Deep.”
+
+Create each big word as its own text box
+Do not type it all in one box. Use separate boxes so you can overlap them.
+
+Text box 1: Deep
+
+Font: League Spartan Black
+Size: 260–310
+Letter spacing: -5 to -8
+Line height: not needed if separate box
+Place near the upper middle.
+
+Text box 2: Inside
+
+Font: League Spartan Black
+Size: 150–180
+Letter spacing: -4 to -6
+Place it tucked under “Deep,” overlapping slightly.
+
+Text box 3: you
+
+Font: League Spartan Black
+Size: 255–310
+Letter spacing: -5 to -8
+Place it under “Inside,” overlapping so the words feel stacked tightly.
+Alignment
+Select all 3 large text boxes.
+Align left.
+Keep the left edge around 8–12% from the canvas edge.
+The words should overlap vertically, especially:
+“Inside” should sit partly under “Deep.”
+“you” should sit very close under “Inside.”
+Layering
+Keep all text above the background.
+No shadow.
+No outline.
+No transparency.
+The clean flat cream text is what makes it look expensive.
+
+----type rules added:---
+keep all of these typography rules and ADD on that no em-dashes are to be used ever in any text, All instagram stand-alone posts or carousel content will be designed on a 4:5 Instagram canvas, but every important visual and text element must fit inside the centered 1:1 crop area for YouTube and other square repurposing formats. Instagram carousel canvas: 1080 x 1350 px.
+Centered 1:1 safe zone: 1080 x 1080 px.
+Critical content inside safe zone: headers, body copy, diagrams, CTA text, arrows, labels, and primary images.
+Allowed outside safe zone: logo, handle, page numbers, page dots, decorative textures, and background overflow.
+Recommended safe margins: 100-120 px side margins, 120-140 px top margin, 140-170 px bottom margin inside the safe zone.
+
+---buttons---
+: i want the buttons to be a modern, 3d (lifted) visual that uses our red and/or gold colors to identify hover vs non-hover state and make sure to use color psychology for choosing the colors to help encourage clicking on the buttons or to identify key points or dos/donts
+
+-- "Components — Carousel Chrome":--
+page indicator should be a progress bar that uses either our gold or wine colors to fill up page after page and on the right hand side of the progress bar is the page number/max pages on a chocolate brown or ivory background similar to the attached image and in the middle if it's not our handle it can be a short form name of the carousel topic like "PCOS IS NOW PMOS" if needed based on the carousel design
+
+---hand annotation---
+the scrapbook text and annotation should be used to outline parts of images, emphasize concepts, phrases and identity-mirror moments, or add doodles to enhance storytelling and relatability when appropriate without taking away from the main message. background may be an image or a solid background and images may be added to slide that can be doodled on. the ivory cream and chocolate colors would be used more for doodling with the gold and yellow being used sparingly for major key concepts
+
+---cta block---
+the cta block should use color psychology to inform what colors should be used to entice the person to take the action. CTA's can be to comment/DM (they should always be paired), to follow, save, repost, share, etc 
+
+when it comes to the call to action we want to get them to do X if they got some sort of benefit from the post or to get a specific outcome. for example (but phrased better to align with the premium buyer)
+
+-did you find this post eye-opening? then LIKE the post
+-ready for the hormone-first approach to melt the belly fat? comment/DM PB30 and i'll show you how
+-REPOST and SHARE this post if you found it X
+-LIKE this post if you've ever done Y (something that was reframed or belief broken in the content)
+-comment/dm LABS and i'll send you our yearly PCOS / PMOS lab guide to help you stay ontop of your health when your doctors aren't 
+-
+
+OUTCOME-FOCUSED call to actions when asking for a keyword (CTA) (2-3 lines)
+   Written for the time-poor, action-oriented premium buyer.
+   Name what she will receive (an assessment, a protocol, a call, a guide) — not just a program name.
+   The tone should assume she is already the kind of person who acts. Never ask her to
+   'finally take the step' or 'invest in herself.' Those phrases imply hesitation she does not have.
+
+LANGUAGE RULES: - Always use "you" and "your" when addressing the reader, not "women with PCOS" or "she" - Never say: struggling with, overwhelmed, journey, I see you, you deserve better, if I can do it so can you, so many of you have asked - Never write mechanism descriptions that require her to be in a clinical mindset to understand. 
+
+---Instagram carousel---
+this Instagram carousel needs to be updated with the already approved palette typography and instructions that I gave in previous components. The cover page may have an image like in the attached cover page example for PCOS is now PMOS and the image may be darkened make sure that the cover page looks similar to the example that is attached for the first slide. Additionally all texts should fall within the guidelines and specifications that I gave previously when it comes to the 4 by 5 Instagram layout. 
+
+never use any em-dashes in any content going forward
+
+the mini headers like "reframe" and "system" on the slides need to be removed, only include headers that serve the reader. 
+
+the doodle text used on slide 2 makes no sense, this is an accent font that has specific rules explained previously
+
+we are missing a slide for social proof - before and afters, client testimonials, video testimonial, etc
+
+missing the loading bar on the pages
+
+slide 4 aesthetically is nice however the explanations for example for insulin dominance PCOS is very shallow these slides although we want them to be minimalist they still need to be complete making sure that it provides clarity to the reader instead of leading them to asking more questions so if we're mentioning not all PCOS is the same and we say insulin dominance we need to explain what that looks like not just from a hormonal perspective but also what the symptoms look like for the woman to be able to identify it within themselves. I would rather have you split up slides like this into 2 or 3 to make sure that we get complete information instead of reducing the information and make an aligning with the minimalist aesthetic but leaving the reader confused
+
+storytelling is missing from these slides, they are too heavy leaning on the clinical and authority side, we've done an audit on carousels and content before in the content project utilize that to support with the wording and phrasing 
+
+slide 5 although aesthetically pleasing is kind of a useless slide it doesn't provide any value to the reader besides a basic statement we want to make sure that when we are using these statements there is an end goal to it saying you have done you have been doing the right things with the wrong tools and then putting for the woman who's already invested that sounds OK but it actually doesn't mean anything every single slide should mean something it should add to the their understanding or it should lead to a greater story that is being told to help further their understanding and to get to that end goal whatever that goal is whether it's to get them to like to comment to reframe to get them to join our community whatever that looks like but we don't want slides that just have words on them that don't actually help to clarify anything it's OK if these slides are being used as standalone slides in a bigger story and maybe the next slide after it explains what is being meant by that statement because it is a powerful statement but we never want to just have a slide like this and then the next slide has zero explanation as to what was meant by Slide 5
+
+the call to action slide needs to align with the feedback and guidance given for our call to aciton blocks
+
+
+--editorial cards--
+remove the titles "mechanism" and "reframe" from the editorial cards those don't serve the reader they are just for us as the designer 
+
+the text in the editorial cards should never use em-dashes 
+we should be using outcome framing, highlighting proprietary mechanisms, goals we'll help them reach 
+
+and every statement about what we help them achieve should be framed as a benefit to the time-poor ambitious premium buyer who doesn't mind investing so long as they are confident our approach can help them 
+
+everything should sound like we are talking to one person "you" instead of "women with pcos", etc
+
+so instead of the text you have for the Hormone-First Approach card we'd say something like "your pcos biology needs structured personalization for you to get your energy back and have a body that aligns with your ambition that's why we identify your specific hormonal drivers as the first step" (or something along those lines aligned with our premium buyer)

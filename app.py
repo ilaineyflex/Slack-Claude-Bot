@@ -12,6 +12,8 @@ from flask import Flask, jsonify, request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+from guide_builder import detect_guide_promise, run_guide_pipeline
+
 # ── Config ────────────────────────────────────────────────────────────────────
 SLACK_BOT_TOKEN    = os.environ.get("SLACK_BOT_TOKEN", "")
 FATHOM_API_KEY     = os.environ.get("FATHOM_API_KEY", "")
@@ -24,6 +26,7 @@ TIMEZONE           = os.environ.get("TIMEZONE", "America/Los_Angeles")
 GHL_API_KEY        = os.environ.get("GHL_API_KEY", "")
 GHL_LOCATION_ID    = os.environ.get("GHL_LOCATION_ID", "")
 ELAINE_PHONE       = os.environ.get("ELAINE_PHONE", "2508017038")
+PROJECTS_CHANNEL   = os.environ.get("PROJECTS_CHANNEL", "projects-launches-summaries")
 
 # Minutes after call end time for each attempt: 5, 10, 20, 30, 60
 RETRY_DELAYS = [5, 10, 20, 30, 60]
@@ -91,6 +94,85 @@ def run_retroactive():
     except Exception as e:
         print(f"Retroactive error: {e}")
         return jsonify({"error": str(e)}), 500
+
+# ── Manual guide trigger ──────────────────────────────────────────────────────
+@app.route("/run-guide", methods=["GET"])
+def run_guide_manual():
+    """
+    Manually trigger guide generation for a past call.
+
+    Required params:
+      client_name  — exact name as it appears in the Slack thread
+      topic        — the guide topic (if omitted, bot will try to detect from call)
+
+    Optional params:
+      start        — date string YYYY-MM-DD (default: today)
+      end          — date string YYYY-MM-DD (default: same as start)
+    """
+    client_name = request.args.get("client_name", "").strip()
+    topic_override = request.args.get("topic", "").strip()
+    start_date = request.args.get("start", datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d"))
+    end_date = request.args.get("end", start_date)
+
+    if not client_name:
+        return jsonify({"error": "client_name is required"}), 400
+
+    # Build call title pattern for Fathom lookup
+    call_title = f"{client_name} - Client Check-In Call"
+
+    try:
+        fathom_data = get_fathom_recording(call_title, client_name)
+        if not fathom_data:
+            return jsonify({"error": f"No Fathom recording found for {client_name}. Check the name matches the recording title."}), 404
+
+        thread_result = find_client_thread(client_name)
+        if not thread_result:
+            return jsonify({"error": f"No Slack thread found for {client_name} in #{ROSTER_CHANNEL}."}), 404
+
+        channel_id, thread_ts = thread_result
+
+        # Determine topic
+        if topic_override:
+            topic = topic_override
+            client_context = f"Manually triggered guide run for {client_name}."
+        else:
+            guide_det = detect_guide_promise(
+                fathom_data["transcript"],
+                fathom_data.get("fathom_summary", ""),
+                client_name,
+            )
+            if guide_det.get("promised") and guide_det.get("topic"):
+                topic = guide_det["topic"]
+                client_context = guide_det["client_context"]
+            else:
+                return jsonify({
+                    "warning": "No guide promise detected in this call. Pass ?topic= to force guide generation.",
+                    "client": client_name,
+                }), 200
+
+        projects_channel_id = get_channel_id(PROJECTS_CHANNEL)
+
+        t = threading.Thread(
+            target=run_guide_pipeline,
+            args=[
+                client_name, topic, client_context,
+                fathom_data["transcript"], fathom_data.get("fathom_summary", ""),
+                channel_id, thread_ts, projects_channel_id,
+            ],
+            daemon=True,
+        )
+        t.start()
+
+        return jsonify({
+            "status": "started",
+            "client": client_name,
+            "topic": topic,
+        }), 200
+
+    except Exception as e:
+        print(f"/run-guide error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 # ── Slack Events ──────────────────────────────────────────────────────────────
 @app.route("/", methods=["POST"])
@@ -253,6 +335,35 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
     # Non-dated coach tasks: schedule for 6pm next weekday/Saturday
     if summary_data.get("coach_tasks"):
         schedule_coach_tasks(summary_data["coach_tasks"], client_name)
+
+    # Guide pipeline: detect if coach promised to create/send a guide
+    if thread_result:
+        channel_id, thread_ts = thread_result
+        guide_det = detect_guide_promise(
+            fathom_data["transcript"],
+            fathom_data.get("fathom_summary", ""),
+            client_name,
+        )
+        if guide_det.get("promised") and guide_det.get("topic"):
+            print(f"Guide promised detected: {guide_det['topic']}")
+            projects_channel_id = get_channel_id(PROJECTS_CHANNEL)
+            t = threading.Thread(
+                target=run_guide_pipeline,
+                args=[
+                    client_name,
+                    guide_det["topic"],
+                    guide_det["client_context"],
+                    fathom_data["transcript"],
+                    fathom_data.get("fathom_summary", ""),
+                    channel_id,
+                    thread_ts,
+                    projects_channel_id,
+                ],
+                daemon=True,
+            )
+            t.start()
+        else:
+            print("No guide promise detected in this call.")
 
 # ── Fathom helpers ────────────────────────────────────────────────────────────
 def _fathom_clean_display(text):

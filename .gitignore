@@ -1,0 +1,11 @@
+# Added by code-review-graph
+.code-review-graph/
+
+# Brand doc images (large binary files, not needed on Render)
+brand_docs/*.png
+brand_docs/*.jpg
+brand_docs/*.jpeg
+brand_docs/Old Version/
+
+# Node (from docx npm install last session — no longer needed)
+node_modules/
