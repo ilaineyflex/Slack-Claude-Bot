@@ -104,18 +104,51 @@ def _parse_json(raw):
     return {}
 
 
-# ── Step 1: Detect guide promise ──────────────────────────────────────────────
+# ── Step 1: Extract guide task from Fathom coach tasks ────────────────────────
+_GUIDE_NOUNS = {'guide', 'plan', 'protocol', 'resource', 'worksheet', 'checklist',
+                'document', 'program', 'template', 'assessment', 'framework', 'roadmap'}
+_CREATE_VERBS = {'create', 'send', 'prepare', 'write', 'build', 'make', 'develop',
+                 'share', 'email', 'put together'}
+
+def extract_guide_from_tasks(coach_tasks):
+    """
+    Scans Fathom-extracted coach tasks for one that involves creating/sending a guide.
+    Returns {"found": True, "guide_name": str, "full_task": str}
+    or      {"found": False, "guide_name": "", "full_task": ""}
+
+    Prioritises tasks over NLP transcript scanning because Fathom action items
+    are the authoritative source for what was promised on the call.
+    """
+    for task in (coach_tasks or []):
+        task_lower = task.lower()
+        has_verb = any(v in task_lower for v in _CREATE_VERBS)
+        has_noun = any(n in task_lower for n in _GUIDE_NOUNS)
+        if not (has_verb and has_noun):
+            continue
+
+        # Extract the guide/plan name: match "the/a/an [words] Guide/Plan/etc"
+        m = re.search(
+            r'(?:the|a|an)\s+([\w\s\-\'&,]+?'
+            r'(?:Guide|Plan|Protocol|Resource|Worksheet|Checklist|Document|'
+            r'Program|Template|Assessment|Framework|Roadmap))',
+            task, re.IGNORECASE
+        )
+        guide_name = m.group(1).strip() if m else task.strip()
+        return {"found": True, "guide_name": guide_name, "full_task": task}
+
+    return {"found": False, "guide_name": "", "full_task": ""}
+
+
 def detect_guide_promise(transcript, fathom_summary, client_name):
     """
-    Returns {"promised": True, "topic": str, "client_context": str}
-    or      {"promised": False, "topic": "", "client_context": ""}
+    Fallback NLP detection for use when coach_tasks are not available
+    (e.g. manual /run-guide without a topic param).
+    Returns {"promised": True/False, "topic": str, "client_context": str}
     """
     combined = (fathom_summary or transcript or "")[:6000]
     prompt = f"""Analyze this call summary/transcript.
 
-Did the COACH (not the client) explicitly commit to creating and sending a guide, plan, protocol, resource, or document to the client?
-
-Look for phrases like: "I'll send you a guide", "I'll create a plan", "I'll put together", "I'll write up", "I'll prepare a", "I'll share a resource", "I'll make you a", "I'll email you a", "I'll build you a", "I'll send over a"
+Did the COACH explicitly commit to creating and sending a guide, plan, protocol, resource, or document to the client?
 
 Client name: {client_name}
 
@@ -123,7 +156,7 @@ CALL CONTENT:
 {combined}
 
 Return ONLY valid JSON with no markdown:
-{{"promised": true_or_false, "topic": "exact topic of the promised guide (empty string if false)", "client_context": "key details from the call relevant to the guide: symptoms, goals, specific concerns, current habits, measurements, medications — empty string if false"}}"""
+{{"promised": true_or_false, "topic": "exact topic of the promised guide (empty string if false)", "client_context": "key details from the call relevant to the guide: symptoms goals concerns habits measurements — empty string if false"}}"""
 
     raw = _groq(prompt, temperature=0.2, max_tokens=512)
     result = _parse_json(raw)

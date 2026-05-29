@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 import threading
 from datetime import datetime, timedelta
 
@@ -12,7 +13,7 @@ from flask import Flask, jsonify, request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-from guide_builder import detect_guide_promise, run_guide_pipeline
+from guide_builder import extract_guide_from_tasks, detect_guide_promise, run_guide_pipeline
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SLACK_BOT_TOKEN    = os.environ.get("SLACK_BOT_TOKEN", "")
@@ -27,6 +28,44 @@ GHL_API_KEY        = os.environ.get("GHL_API_KEY", "")
 GHL_LOCATION_ID    = os.environ.get("GHL_LOCATION_ID", "")
 ELAINE_PHONE       = os.environ.get("ELAINE_PHONE", "2508017038")
 PROJECTS_CHANNEL   = os.environ.get("PROJECTS_CHANNEL", "projects-launches-summaries")
+
+# ── Pending guide verifications ───────────────────────────────────────────────
+# Keyed by normalised client name. Expires after 24 h.
+# Lost on dyno restart — user can always fall back to /run-guide manually.
+_pending_guides: dict = {}
+
+
+def _store_pending(client_name, guide_name, full_task, transcript, fathom_summary,
+                   channel_id, thread_ts, projects_channel_id):
+    key = re.sub(r'\s+', '_', client_name.lower().strip())
+    _pending_guides[key] = {
+        "client_name": client_name,
+        "guide_name": guide_name,
+        "full_task": full_task,
+        "transcript": transcript,
+        "fathom_summary": fathom_summary,
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "projects_channel_id": projects_channel_id,
+        "expires_at": time.time() + 86400,  # 24 hours
+    }
+    return key
+
+
+def _pop_pending(key):
+    entry = _pending_guides.pop(key, None)
+    if entry and time.time() > entry["expires_at"]:
+        return None
+    return entry
+
+
+def _latest_pending():
+    """Return (key, entry) for the most recently added non-expired pending guide."""
+    valid = {k: v for k, v in _pending_guides.items() if time.time() <= v["expires_at"]}
+    if not valid:
+        return None, None
+    key = max(valid, key=lambda k: valid[k]["expires_at"])
+    return key, valid[key]
 
 # Minutes after call end time for each attempt: 5, 10, 20, 30, 60
 RETRY_DELAYS = [5, 10, 20, 30, 60]
@@ -131,24 +170,35 @@ def run_guide_manual():
 
         channel_id, thread_ts = thread_result
 
-        # Determine topic
+        # Determine topic: explicit override > Fathom task extraction > NLP fallback
         if topic_override:
             topic = topic_override
             client_context = f"Manually triggered guide run for {client_name}."
         else:
-            guide_det = detect_guide_promise(
-                fathom_data["transcript"],
-                fathom_data.get("fathom_summary", ""),
-                client_name,
+            # Re-run summary to get coach tasks for task-based extraction
+            summary_data = generate_summary(
+                fathom_data["transcript"], client_name,
+                fathom_summary=fathom_data.get("fathom_summary", "")
             )
-            if guide_det.get("promised") and guide_det.get("topic"):
-                topic = guide_det["topic"]
-                client_context = guide_det["client_context"]
+            guide_task = extract_guide_from_tasks(summary_data.get("coach_tasks", []))
+            if guide_task["found"]:
+                topic = guide_task["guide_name"]
+                client_context = guide_task["full_task"]
             else:
-                return jsonify({
-                    "warning": "No guide promise detected in this call. Pass ?topic= to force guide generation.",
-                    "client": client_name,
-                }), 200
+                # Last resort: NLP detection
+                guide_det = detect_guide_promise(
+                    fathom_data["transcript"],
+                    fathom_data.get("fathom_summary", ""),
+                    client_name,
+                )
+                if guide_det.get("promised") and guide_det.get("topic"):
+                    topic = guide_det["topic"]
+                    client_context = guide_det["client_context"]
+                else:
+                    return jsonify({
+                        "warning": "No guide task found in Fathom tasks and no promise detected. Pass ?topic= to force guide generation.",
+                        "client": client_name,
+                    }), 200
 
         projects_channel_id = get_channel_id(PROJECTS_CHANNEL)
 
@@ -172,6 +222,82 @@ def run_guide_manual():
     except Exception as e:
         print(f"/run-guide error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ── GHL inbound SMS reply (guide verification) ────────────────────────────────
+@app.route("/ghl-sms-reply", methods=["POST"])
+def ghl_sms_reply():
+    """
+    Receives inbound SMS replies from Elaine via a GHL automation webhook.
+    Expects any payload format GHL sends for inbound messages.
+
+    Elaine replies to the guide verification SMS with:
+      YES          → generate with the detected guide name
+      NO           → cancel
+      anything else → use the reply text as the corrected guide topic
+    """
+    data = request.json or {}
+    print("GHL sms-reply received:", json.dumps(data, indent=2)[:500])
+
+    # GHL sends inbound message body in various locations depending on trigger type
+    body = (
+        data.get("message", {}).get("body")
+        or data.get("body")
+        or data.get("text")
+        or data.get("messageBody")
+        or ""
+    ).strip()
+
+    if not body:
+        return "", 200
+
+    body_lower = body.lower().strip()
+    key, entry = _latest_pending()
+
+    if not entry:
+        print("SMS reply received but no pending guide found (may have expired or restarted)")
+        return "", 200
+
+    client_name = entry["client_name"]
+
+    if body_lower in ("yes", "y"):
+        topic = entry["guide_name"]
+        client_context = entry["full_task"]
+        _pop_pending(key)
+        send_ghl_sms(f"Got it! Creating '{topic}' for {client_name} now. I'll post it in Slack when ready (takes a few minutes).")
+        t = threading.Thread(
+            target=run_guide_pipeline,
+            args=[
+                client_name, topic, client_context,
+                entry["transcript"], entry["fathom_summary"],
+                entry["channel_id"], entry["thread_ts"], entry["projects_channel_id"],
+            ],
+            daemon=True,
+        )
+        t.start()
+
+    elif body_lower in ("no", "n"):
+        _pop_pending(key)
+        send_ghl_sms(f"Got it — skipping the guide for {client_name}.")
+
+    else:
+        # Treat the reply as a corrected or additional topic
+        corrected_topic = body.strip()
+        client_context = f"{entry['full_task']} | Additional context: {corrected_topic}"
+        _pop_pending(key)
+        send_ghl_sms(f"Got it! Creating guide on '{corrected_topic}' for {client_name} now. I'll post it in Slack when ready.")
+        t = threading.Thread(
+            target=run_guide_pipeline,
+            args=[
+                client_name, corrected_topic, client_context,
+                entry["transcript"], entry["fathom_summary"],
+                entry["channel_id"], entry["thread_ts"], entry["projects_channel_id"],
+            ],
+            daemon=True,
+        )
+        t.start()
+
+    return "", 200
 
 
 # ── Slack Events ──────────────────────────────────────────────────────────────
@@ -336,34 +462,32 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
     if summary_data.get("coach_tasks"):
         schedule_coach_tasks(summary_data["coach_tasks"], client_name)
 
-    # Guide pipeline: detect if coach promised to create/send a guide
+    # Guide pipeline: check Fathom coach tasks for a guide-creation task
     if thread_result:
         channel_id, thread_ts = thread_result
-        guide_det = detect_guide_promise(
-            fathom_data["transcript"],
-            fathom_data.get("fathom_summary", ""),
-            client_name,
-        )
-        if guide_det.get("promised") and guide_det.get("topic"):
-            print(f"Guide promised detected: {guide_det['topic']}")
+        guide_task = extract_guide_from_tasks(summary_data.get("coach_tasks", []))
+
+        if guide_task["found"]:
+            guide_name = guide_task["guide_name"]
+            full_task  = guide_task["full_task"]
+            print(f"Guide task detected: {guide_name}")
+
             projects_channel_id = get_channel_id(PROJECTS_CHANNEL)
-            t = threading.Thread(
-                target=run_guide_pipeline,
-                args=[
-                    client_name,
-                    guide_det["topic"],
-                    guide_det["client_context"],
-                    fathom_data["transcript"],
-                    fathom_data.get("fathom_summary", ""),
-                    channel_id,
-                    thread_ts,
-                    projects_channel_id,
-                ],
-                daemon=True,
+            _store_pending(
+                client_name, guide_name, full_task,
+                fathom_data["transcript"], fathom_data.get("fathom_summary", ""),
+                channel_id, thread_ts, projects_channel_id,
             )
-            t.start()
+
+            # Send SMS to Elaine for confirmation before generating anything
+            send_ghl_sms(
+                f"N2F Guide Bot: guide task found for {client_name}.\n\n"
+                f"\"{full_task}\"\n\n"
+                f"Reply YES to generate, NO to skip, or type a corrected topic."
+            )
+            print(f"Verification SMS sent to Elaine for guide: {guide_name}")
         else:
-            print("No guide promise detected in this call.")
+            print("No guide-creation task found in Fathom coach tasks.")
 
 # ── Fathom helpers ────────────────────────────────────────────────────────────
 def _fathom_clean_display(text):
