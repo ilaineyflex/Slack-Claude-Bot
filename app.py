@@ -28,15 +28,17 @@ GHL_API_KEY        = os.environ.get("GHL_API_KEY", "")
 GHL_LOCATION_ID    = os.environ.get("GHL_LOCATION_ID", "")
 ELAINE_PHONE       = os.environ.get("ELAINE_PHONE", "2508017038")
 PROJECTS_CHANNEL   = os.environ.get("PROJECTS_CHANNEL", "projects-launches-summaries")
+N2F_BOTS_CHANNEL   = os.environ.get("N2F_BOTS_CHANNEL", "n2f-bots")
 
 # ── Pending guide verifications ───────────────────────────────────────────────
-# Keyed by normalised client name. Expires after 24 h.
-# Lost on dyno restart — user can always fall back to /run-guide manually.
+# Keyed by normalised client name. verify_ts is the ts of the Slack verification
+# message posted to #n2f-bots — used to match threaded replies.
+# Lost on dyno restart — user can fall back to /run-guide manually.
 _pending_guides: dict = {}
 
 
 def _store_pending(client_name, guide_name, full_task, transcript, fathom_summary,
-                   channel_id, thread_ts, projects_channel_id):
+                   channel_id, thread_ts, projects_channel_id, verify_ts=None):
     key = re.sub(r'\s+', '_', client_name.lower().strip())
     _pending_guides[key] = {
         "client_name": client_name,
@@ -47,7 +49,8 @@ def _store_pending(client_name, guide_name, full_task, transcript, fathom_summar
         "channel_id": channel_id,
         "thread_ts": thread_ts,
         "projects_channel_id": projects_channel_id,
-        "expires_at": time.time() + 86400,  # 24 hours
+        "verify_ts": verify_ts,        # ts of the #n2f-bots verification message
+        "expires_at": time.time() + 86400,
     }
     return key
 
@@ -59,13 +62,12 @@ def _pop_pending(key):
     return entry
 
 
-def _latest_pending():
-    """Return (key, entry) for the most recently added non-expired pending guide."""
-    valid = {k: v for k, v in _pending_guides.items() if time.time() <= v["expires_at"]}
-    if not valid:
-        return None, None
-    key = max(valid, key=lambda k: valid[k]["expires_at"])
-    return key, valid[key]
+def _find_pending_by_verify_ts(verify_ts):
+    """Return (key, entry) for the pending guide whose verification message matches."""
+    for k, v in list(_pending_guides.items()):
+        if v.get("verify_ts") == verify_ts and time.time() <= v["expires_at"]:
+            return k, v
+    return None, None
 
 # Minutes after call end time for each attempt: 5, 10, 20, 30, 60
 RETRY_DELAYS = [5, 10, 20, 30, 60]
@@ -224,82 +226,6 @@ def run_guide_manual():
         return jsonify({"error": str(e)}), 500
 
 
-# ── GHL inbound SMS reply (guide verification) ────────────────────────────────
-@app.route("/ghl-sms-reply", methods=["POST"])
-def ghl_sms_reply():
-    """
-    Receives inbound SMS replies from Elaine via a GHL automation webhook.
-    Expects any payload format GHL sends for inbound messages.
-
-    Elaine replies to the guide verification SMS with:
-      YES          → generate with the detected guide name
-      NO           → cancel
-      anything else → use the reply text as the corrected guide topic
-    """
-    data = request.json or {}
-    print("GHL sms-reply received:", json.dumps(data, indent=2)[:500])
-
-    # GHL sends inbound message body in various locations depending on trigger type
-    body = (
-        data.get("message", {}).get("body")
-        or data.get("body")
-        or data.get("text")
-        or data.get("messageBody")
-        or ""
-    ).strip()
-
-    if not body:
-        return "", 200
-
-    body_lower = body.lower().strip()
-    key, entry = _latest_pending()
-
-    if not entry:
-        print("SMS reply received but no pending guide found (may have expired or restarted)")
-        return "", 200
-
-    client_name = entry["client_name"]
-
-    if body_lower in ("yes", "y"):
-        topic = entry["guide_name"]
-        client_context = entry["full_task"]
-        _pop_pending(key)
-        send_ghl_sms(f"Got it! Creating '{topic}' for {client_name} now. I'll post it in Slack when ready (takes a few minutes).")
-        t = threading.Thread(
-            target=run_guide_pipeline,
-            args=[
-                client_name, topic, client_context,
-                entry["transcript"], entry["fathom_summary"],
-                entry["channel_id"], entry["thread_ts"], entry["projects_channel_id"],
-            ],
-            daemon=True,
-        )
-        t.start()
-
-    elif body_lower in ("no", "n"):
-        _pop_pending(key)
-        send_ghl_sms(f"Got it — skipping the guide for {client_name}.")
-
-    else:
-        # Treat the reply as a corrected or additional topic
-        corrected_topic = body.strip()
-        client_context = f"{entry['full_task']} | Additional context: {corrected_topic}"
-        _pop_pending(key)
-        send_ghl_sms(f"Got it! Creating guide on '{corrected_topic}' for {client_name} now. I'll post it in Slack when ready.")
-        t = threading.Thread(
-            target=run_guide_pipeline,
-            args=[
-                client_name, corrected_topic, client_context,
-                entry["transcript"], entry["fathom_summary"],
-                entry["channel_id"], entry["thread_ts"], entry["projects_channel_id"],
-            ],
-            daemon=True,
-        )
-        t.start()
-
-    return "", 200
-
-
 # ── Slack Events ──────────────────────────────────────────────────────────────
 @app.route("/", methods=["POST"])
 def slack_events():
@@ -312,7 +238,54 @@ def slack_events():
     if event.get("type") == "app_mention":
         channel = event["channel"]
         thread_ts = event.get("thread_ts") or event["ts"]
-        post_to_thread(channel, thread_ts, "Hello, I got your message!")
+        raw_text = event.get("text", "")
+        # Strip the @mention so we get just the reply content
+        reply_text = re.sub(r'<@[A-Z0-9]+>', '', raw_text).strip()
+        reply_lower = reply_text.lower()
+
+        # Check if this is a reply to a guide verification message
+        pkey, entry = _find_pending_by_verify_ts(thread_ts)
+        if entry:
+            client_name = entry["client_name"]
+            if reply_lower in ("yes", "y"):
+                topic = entry["guide_name"]
+                client_context = entry["full_task"]
+                _pop_pending(pkey)
+                post_to_thread(channel, thread_ts,
+                    f"Got it! Creating *{topic}* for {client_name} now. "
+                    f"I'll post it in Slack when ready (takes a few minutes).")
+                t = threading.Thread(
+                    target=run_guide_pipeline,
+                    args=[client_name, topic, client_context,
+                          entry["transcript"], entry["fathom_summary"],
+                          entry["channel_id"], entry["thread_ts"],
+                          entry["projects_channel_id"]],
+                    daemon=True,
+                )
+                t.start()
+            elif reply_lower in ("no", "n"):
+                _pop_pending(pkey)
+                post_to_thread(channel, thread_ts,
+                    f"Got it — skipping the guide for {client_name}.")
+            else:
+                # Any other text is treated as a corrected or expanded topic
+                corrected_topic = reply_text
+                client_context = f"{entry['full_task']} | Additional context: {corrected_topic}"
+                _pop_pending(pkey)
+                post_to_thread(channel, thread_ts,
+                    f"Got it! Creating a guide on *{corrected_topic}* for {client_name} now. "
+                    f"I'll post it in Slack when ready.")
+                t = threading.Thread(
+                    target=run_guide_pipeline,
+                    args=[client_name, corrected_topic, client_context,
+                          entry["transcript"], entry["fathom_summary"],
+                          entry["channel_id"], entry["thread_ts"],
+                          entry["projects_channel_id"]],
+                    daemon=True,
+                )
+                t.start()
+        else:
+            post_to_thread(channel, thread_ts, "Hello, I got your message!")
     return "", 200
 
 # ── GHL Webhook ───────────────────────────────────────────────────────────────
@@ -473,19 +446,17 @@ def run_post_call_automation(client_name, call_title, end_time_iso=None, attempt
             print(f"Guide task detected: {guide_name}")
 
             projects_channel_id = get_channel_id(PROJECTS_CHANNEL)
+
+            # Post verification to #n2f-bots and capture its ts for reply matching
+            verify_ts = post_guide_verification(client_name, guide_name, full_task)
+
             _store_pending(
                 client_name, guide_name, full_task,
                 fathom_data["transcript"], fathom_data.get("fathom_summary", ""),
                 channel_id, thread_ts, projects_channel_id,
+                verify_ts=verify_ts,
             )
-
-            # Send SMS to Elaine for confirmation before generating anything
-            send_ghl_sms(
-                f"N2F Guide Bot: guide task found for {client_name}.\n\n"
-                f"\"{full_task}\"\n\n"
-                f"Reply YES to generate, NO to skip, or type a corrected topic."
-            )
-            print(f"Verification SMS sent to Elaine for guide: {guide_name}")
+            print(f"Verification posted to #{N2F_BOTS_CHANNEL} for guide: {guide_name}")
         else:
             print("No guide-creation task found in Fathom coach tasks.")
 
@@ -821,6 +792,34 @@ def post_to_thread(channel_id, thread_ts, text):
         json={"channel": channel_id, "thread_ts": thread_ts, "text": text}
     )
     print("Slack post:", resp.json().get("ok"), resp.json().get("error", ""))
+
+def post_guide_verification(client_name, guide_name, full_task):
+    """Post a guide verification request to #n2f-bots. Returns the message ts."""
+    channel_id = get_channel_id(N2F_BOTS_CHANNEL)
+    if not channel_id:
+        print(f"#{N2F_BOTS_CHANNEL} not found — cannot post guide verification")
+        return None
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+    text = (
+        f"*Guide task found for {client_name}:*\n"
+        f"> {full_task}\n\n"
+        f"*Proposed guide name:* {guide_name}\n\n"
+        f"Reply to this thread @mentioning me:\n"
+        f"• `@bot YES` — generate with the name above\n"
+        f"• `@bot NO` — skip\n"
+        f"• `@bot [corrected topic]` — use a different topic or add context"
+    )
+    resp = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers=headers,
+        json={"channel": channel_id, "text": text},
+    )
+    data = resp.json()
+    if data.get("ok"):
+        return data.get("ts")
+    print(f"Failed to post guide verification: {data.get('error')}")
+    return None
+
 
 def notify_fallback(text):
     channel_id = get_channel_id(FALLBACK_CHANNEL)
