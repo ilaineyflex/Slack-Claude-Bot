@@ -24,6 +24,12 @@ SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
+# Use 70b only for the client guide (quality-critical).
+# Selling, digital product, and lead magnet use 8b-instant which has a
+# SEPARATE 500k token/day limit — avoids burning the 100k/day 70b quota.
+MODEL_MAIN = "llama-3.3-70b-versatile"
+MODEL_FAST = "llama-3.1-8b-instant"
+
 BRAND_DOCS_DIR = os.path.join(os.path.dirname(__file__), "brand_docs")
 
 _GUIDE_VOICE_FILES = [
@@ -77,9 +83,11 @@ def _get_brand_context(file_list, max_chars_each=4000):
 
 
 # ── Groq helpers ──────────────────────────────────────────────────────────────
-def _groq(prompt, temperature=0.4, max_tokens=4096):
+def _groq(prompt, temperature=0.4, max_tokens=4096, model=None):
+    if model is None:
+        model = MODEL_MAIN
     completion = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
         max_tokens=max_tokens,
@@ -134,7 +142,7 @@ CALL:
 
 Return ONLY valid JSON:
 {{"promised": true_or_false, "topic": "exact topic (empty if false)", "client_context": "key call details (empty if false)"}}"""
-    result = _parse_json(_groq(prompt, temperature=0.2, max_tokens=400))
+    result = _parse_json(_groq(prompt, temperature=0.2, max_tokens=400, model=MODEL_FAST))
     if not isinstance(result, dict):
         return {"promised": False, "topic": "", "client_context": ""}
     result.setdefault("promised", False)
@@ -178,96 +186,151 @@ def generate_client_guide(topic, client_context, client_name,
                           transcript="", fathom_summary=""):
     """
     Returns richly structured guide data for docx rendering.
-    Sections contain: heading, key_insight_box, action_steps, table (optional),
-    key_takeaway, image_prompt, review_note.
+    Uses MODEL_MAIN (70b) for quality. Sections are prescribed by heading to
+    ensure consistent, high-touch structure across all cultural food guides.
     """
-    brand_ctx = _get_brand_context(_GUIDE_VOICE_FILES, max_chars_each=3500)
+    import time as _time
 
-    # Surface specific examples Elaine gave on the call
-    transcript_excerpt = (transcript or fathom_summary or "")[:5000]
+    # Compact voice rules — avoids sending 17k chars of brand docs
+    VOICE = (
+        "Tone: Confident Yet Soft. Warm, direct, knowledgeable best friend — not a textbook. "
+        "Outcome-first language: lead with transformation, not process. "
+        "Client is high-ticket: WE do the research for her, we hand her cheat sheets. "
+        "Never tell her to 'go research' anything. "
+        "BANNED PHRASES: 'culturally intelligent', 'culturally aware', 'culturally sensitive', "
+        "'hormone journey', 'health journey', 'empower yourself', 'take control of your health', "
+        "'holistic', 'portion control', 'mindful eating', 'food scale', 'measuring cups'. "
+        "N2F brand: New To Fitness by Elaine Acheampong (@ilaineyflex). "
+        "CTAs: private WhatsApp community, booking a call, follow @ilaineyflex."
+    )
 
-    # Detect which N2F mechanisms are actually mentioned in this call
+    transcript_excerpt = (transcript or fathom_summary or "")[:4000]
+
+    # Only reference mechanisms the client actually uses
     mechanism_check = ""
     for mech in ["Hormone-First Approach", "HormoneSync Movement",
                  "10-Hour Hormone Optimization Window", "Hormonal Driver Assessment"]:
         if mech.lower() in transcript_excerpt.lower():
-            mechanism_check += f"\n- {mech} (mentioned in call — safe to reference)"
+            mechanism_check += f"\n- {mech}"
     if not mechanism_check:
-        mechanism_check = "\nNone of the N2F proprietary mechanisms were explicitly mentioned in this call. Do NOT introduce any of them in this guide."
+        mechanism_check = "None explicitly mentioned in this call — do NOT introduce any N2F mechanism names."
 
-    prompt = f"""You are writing a client-facing guide for New To Fitness, Elaine Acheampong's PCOS hormone health coaching brand.
+    prompt = f"""You are writing a comprehensive, high-touch client-facing guide for New To Fitness.
 
-BRAND VOICE RULES (follow exactly):
-{brand_ctx}
+VOICE: {VOICE}
 
 TOPIC: "{topic}"
 CLIENT: {client_name}
 CALL NOTES: {client_context}
 
-CALL TRANSCRIPT (read carefully — every specific tip, food substitution, example, or actionable advice Elaine gave on this call MUST appear in the guide. Build the guide AROUND these specifics, then supplement with proven science):
+CALL TRANSCRIPT (extract every specific example, food swap, or tip Elaine gave and weave it into the guide):
 {transcript_excerpt}
 
-N2F MECHANISMS CLEARED FOR THIS GUIDE (only reference these — do not introduce any others):
+N2F MECHANISMS CLEARED (only reference if listed):
 {mechanism_check}
 
-STRICT RULES:
-1. The guide solves ONE specific problem: "{topic}"
-2. Every section must have SPECIFIC ACTIONABLE STEPS — not "reduce oil" but "replace half your palm oil with light olive oil — same flavour profile, cuts the saturated fat load by 60%"
-3. Extract every specific example from the transcript above and use them as the core content
-4. Do NOT introduce broad coaching topics not directly related to {topic}
-5. Banned phrases: "culturally intelligent", "culturally aware", "culturally sensitive", "hormone journey", "health journey", "empower yourself", "take control of your health"
-6. Tone: Confident Yet Soft — warm, direct, specific. Write like a knowledgeable best friend, not a textbook
-7. Evergreen: works for any client with cultural food + PCOS needs, not just {client_name}
-8. Tables: use them to compare ingredient options, swap lists, or portion guides — wherever a table communicates information more clearly than prose
-9. image_prompt: write a specific Gemini AI image generation prompt for a realistic, editorial-quality photo relevant to each section
+SCIENTIFIC STANDARD: Back every recommendation with real science. Include 2-3 statistics or study references in the intro (e.g. "Women with PCOS have up to 4x higher insulin resistance..."). Action steps must cite the physiological mechanism behind the recommendation (e.g. "Switching to basmati from jasmine lowers the glycemic response by ~30% because of its higher amylose content").
 
-Return ONLY valid JSON with no markdown fences. All string values must use \\n for line breaks, never literal newlines:
+HABIT COACHING STANDARD: Frame every action step using proven habit-change psychology — make it small, specific, tied to an existing habit, and immediately achievable. Reduce friction. Example: "Next time you're making jollof, swap out 1 cup of rice for 1 cup of coarse bulgur — keep everything else exactly the same."
+
+SECTION STRUCTURE — generate ALL 9 sections below in this exact order. Each section must have a `section_intro` (2-3 sentences explaining what this section is and why it matters before diving into content), then its content:
+
+SECTION 1 — "Why This Guide Exists: Cultural Food + PCOS"
+Include: 2-3 PCOS/insulin resistance statistics, a relatable story hook (e.g. "You've eaten jollof your whole life and your body never complained — until now"), and what the client will be able to do differently after this guide. This is the emotional and scientific foundation.
+
+SECTION 2 — "Rice & Your Blood Sugar: The Most Impactful Swap You Can Make"
+Include: GI comparison table for Jasmine rice, Basmati rice, Sticky/Glutinous rice, Brown Jasmine, Brown Basmati, and Parboiled rice. Add a key disclaimer that GI is a tool but doesn't account for food pairing (protein, fat, fiber lower the actual blood sugar response). Then: a table of blood-sugar-friendly grain alternatives (Coarse Bulgur, Farro, Couscous, Quinoa, Barley, Pearl Millet) with columns: Grain | GI Score | Flavor Profile | Best Used In | Why It Works For PCOS. NOTE: For African dishes like jollof or stew-based dishes, coarse bulgur has the most similar texture to rice — it soaks up sauces the same way and maintains consistency. This is the coach-recommended #1 swap for African cultural dishes.
+
+SECTION 3 — "The Hormone-Friendly Plate: Your Cultural Food Formula"
+Include: the plate formula (1/2 plate colorful vegetables or fruit, 1/4 slow-digesting carbs WITH EXAMPLES, 1/4 to 1/2 plate protein WITH EXAMPLES, cook in healthy fat, water or sparkling water). Then generate EXACTLY 7 detailed cultural cuisine examples of a Hormone-Friendly Plate. For EACH example: name the cuisine, describe exactly what is on the plate (specific dishes), and write a Gemini AI image generation prompt for a realistic editorial photo of that plate of food. Cuisines to cover: West African, East African, South Asian (Indian/Pakistani), Caribbean, Middle Eastern, South American, Southern US/Soul Food.
+
+SECTION 4 — "Cultural Food Ingredient Swaps: Your Coach-Vetted Cheat Sheet"
+This is the research WE did so she doesn't have to. Generate a comprehensive swap table organized by cuisine region. NEVER say "research alternatives." The table must have 4 columns: Traditional Ingredient | PCOS-Friendly Alternative | Hormonal/Physiological Benefit | Outcome For You (client-facing benefit). Cover: West African ingredients (palm oil, Maggi/seasoning cubes, white rice, deep-fried items, full-fat coconut milk), South Asian (white rice, ghee in excess, refined flour/maida, full-fat yogurt in excess), East/Southeast Asian (soy sauce high sodium, white rice, deep-fried proteins), Middle Eastern (white rice, tahini in excess, refined pita), South American (white rice, refined corn products), Southern US/Soul Food (lard/crisco, white rice, deep-fried proteins, pork products).
+
+SECTION 5 — "Making Cultural Carbs Work For You: Beyond Rice"
+Focus on plantain (common in African, Caribbean, South American cuisines): ripe vs less ripe plantain and the blood sugar implications (ripe plantain = higher GI). Give cooking method swaps: deep fry → air fry (same crispy result), or boil in water and serve with stew and protein. Add examples for other cultural carbs: fufu/pounded yam alternatives, eba/garri modifications, roti/chapati swaps, injera modifications, tortilla alternatives.
+
+SECTION 6 — "Protein in Cultural Foods: Why Your Plate Is Unbalanced and How to Fix It"
+Open with the specific problem: many cultural meals default to 3/4 plate of rice/carbs, a side of plantain, and 1 small piece of protein — this pattern causes the blood sugar crashes, energy dips, and cravings women with PCOS experience. Explain the science of protein's role in blood sugar regulation. Then: how to increase protein portions in traditional dishes. Generate a table: Protein Type | Standard Cut | Hormone-Friendly Cut | Why (e.g. Extra Lean Ground Beef vs Regular Ground Beef, Chicken Breast vs Chicken Leg, Goat Leg vs Goat Shoulder, etc.). Include tips on cooking method: air fry vs deep fry for proteins. Include specific tip on high-fat meats: for meats like bacon where a low-sodium version isn't available, soak in cold water for 4-6 hours to draw out most of the salt, then air fry until crispy to render out the majority of the fat — this makes it significantly more manageable.
+
+SECTION 7 — "Cooking Equipment Worth Investing In"
+Equipment that supports the cooking method swaps recommended in this guide. Include: Air fryer (most important — why it works for cultural cooking), Non-stick cookware (explain PFOA-free options), Stainless steel cookware (when to use), Cast iron pan (benefits for cultural cooking, adds iron), Other relevant tools. For each: brief explanation of why it matters for PCOS-friendly cultural cooking.
+
+SECTION 8 — "Your Cultural Food Swaps Grocery List"
+A categorized grocery list of all the swap items referenced in this guide. Format as categories with items. Each item should note what it replaces. Categories: Grains & Carbs, Oils & Fats, Proteins, Vegetables & Produce, Seasonings & Condiments, Cooking Equipment.
+
+SECTION 9 — "Your 30-Day Cultural Food Audit: A Step-by-Step Plan"
+Frame using the habit psychology principle of "minimum viable change" — they do NOT need to throw out their pantry or replace everything at once. Step-by-step weekly plan: Week 1 (audit only: write down your 5 most-eaten cultural dishes and their main ingredients), Week 2 (pick ONE swap to implement — whichever comes up naturally in your next grocery shop), Week 3-4 (add a second swap, let the coach/group chat know what you're working on). End with: "At the end of 30 days, message your coach or post in the group chat: what is the ONE cultural food swap you have implemented?" and direct them to share their main takeaway from this guide with their coach.
+
+ADDITIONAL OUTPUTS:
+- `trainerize_habits`: List 6-8 specific, trackable habits the coach can add in Trainerize for any client using this guide. Format as short action habits (e.g. "Build a Hormone-Friendly Plate at dinner", "Swap rice for bulgur in 1 meal this week"). These should be implementable immediately.
+- `quick_reference_checklist`: 10-12 key actions from the entire guide, phrased as checkboxes
+- `note_to_send_to_client`: 3-4 sentence warm message from Elaine to {client_name} referencing something specific from their call. Confident Yet Soft.
+- `keyword`: A specific 2-3 word phrase someone would type to trigger this guide automation (not: food, cook, eat, oil)
+- `references`: List of 3-5 scientific sources cited (journal/study name + finding, no full URLs needed)
+
+Return ONLY valid JSON with no markdown fences. Use \\n for line breaks inside strings, never literal newlines:
 {{
-  "guide_name": "Short outcome-first name following N2F naming conventions",
-  "subtitle": "Specific outcome subheader — what they will achieve",
+  "guide_name": "Outcome-first guide name (N2F naming conventions)",
+  "subtitle": "What they will achieve — specific and client-facing",
   "problem_statement": "One sentence: the exact problem this guide solves",
-  "intro": "2-3 sentences max. Outcome-first. What they will be able to do after reading this. Warm and direct.",
+  "intro_science": "2-3 sentences with specific PCOS statistics and the science hook",
+  "intro_story": "2-3 sentences: a relatable story hook the client has likely lived",
+  "intro_promise": "1-2 sentences: what they will be able to do differently after this guide",
   "sections": [
     {{
-      "heading": "Section heading",
-      "key_insight_box": "1-2 sentence key insight to call out visually — the most important thing to know in this section",
-      "action_steps": ["Specific step with exact amounts/ratios/methods where relevant", "Another specific step"],
+      "heading": "Exact section heading as prescribed above",
+      "section_intro": "2-3 sentences explaining what this section is and why it matters — before any content",
+      "key_insight_box": "The single most important insight from this section, 1-2 sentences",
+      "action_steps": ["Specific actionable step with exact method/amount/timing", "Another step"],
       "table": {{
         "use": false,
+        "caption": "",
         "headers": [],
         "rows": []
       }},
-      "key_takeaway": "One sentence: what to remember and implement from this section",
-      "image_prompt": "Gemini AI prompt: realistic editorial wellness photo of [specific scene relevant to this section, e.g. 'a West African woman in a modern kitchen mixing palm oil and olive oil, warm natural lighting, editorial magazine aesthetic']",
-      "review_note": "What Elaine should verify scientifically or update for brand voice — empty string if confident"
+      "cuisine_plate_examples": [],
+      "key_takeaway": "One sentence: what to remember and implement",
+      "image_prompt": "Gemini AI image generation prompt: realistic editorial wellness photo of [specific scene]",
+      "review_note": "What Elaine should verify — empty string if confident"
     }}
   ],
-  "quick_reference_checklist": ["First actionable item from guide", "Second actionable item", "Continue for all key actions"],
-  "mid_doc_cta": "Short warm CTA to appear mid-document — invite to the private WhatsApp community or next call (1-2 sentences)",
-  "end_cta": "Closing CTA — invite to book a call, join community, and follow @ilaineyflex (2-3 sentences)",
-  "note_to_send_to_client": "3-4 sentence warm message from Elaine to {client_name} referencing something specific from their call. Confident Yet Soft tone.",
-  "keyword": "Specific automation keyword — NOT a common word clients say casually (avoid: food, cook, eat, oil, diet)"
+  "quick_reference_checklist": ["Checkbox action 1", "Checkbox action 2"],
+  "trainerize_habits": ["Trackable habit 1 for Trainerize", "Trackable habit 2"],
+  "mid_doc_cta": "Warm mid-document CTA — private WhatsApp community or next call (1-2 sentences)",
+  "end_cta": "Closing CTA — book a call + join community + follow @ilaineyflex (2-3 sentences)",
+  "note_to_send_to_client": "3-4 sentences from Elaine to {client_name}, referencing something specific from their call",
+  "references": ["Study/source 1", "Study/source 2", "Study/source 3"],
+  "keyword": "specific trigger phrase"
 }}
 
-Include 4-6 sections. Use tables in at least 1-2 sections where swaps, comparisons, or ingredient lists are involved."""
+For Section 3, the `cuisine_plate_examples` field must be an array of objects:
+{{"cuisine": "West African", "plate_description": "exactly what is on this plate", "image_prompt": "Gemini AI prompt for this specific plate"}}
 
-    raw = _groq(prompt, temperature=0.4, max_tokens=5000)
+For the GROCERY LIST section (Section 8), use `action_steps` as a flat list of items formatted as "Item name [replaces: traditional ingredient]". Use `table` for any category breakdown."""
+
+    raw = _groq(prompt, temperature=0.4, max_tokens=8000, model=MODEL_MAIN)
     result = _parse_json(raw)
     if not result or not result.get("sections"):
         result = {
             "guide_name": f"{topic} Guide",
-            "subtitle": "Actionable steps for hormonal balance",
-            "problem_statement": f"How to manage {topic} with PCOS.",
-            "intro": f"This guide covers {topic} for women managing PCOS.",
-            "sections": [{"heading": "Overview", "content": raw[:2000],
+            "subtitle": "Hormone-friendly strategies for your cultural kitchen",
+            "problem_statement": f"How to navigate {topic} with PCOS without giving up your food.",
+            "intro_science": f"Women with PCOS have up to 4x higher insulin resistance than women without the condition.",
+            "intro_story": "You've been eating the foods you grew up with your whole life — and now you're being told they're the problem.",
+            "intro_promise": "This guide gives you the exact swaps, strategies, and cheat sheets to keep eating your cultural foods while supporting your hormones.",
+            "sections": [{"heading": "Overview", "section_intro": "Content generation failed — regenerate.", "content": raw[:2000],
                           "key_insight_box": "", "action_steps": [],
-                          "table": {"use": False, "headers": [], "rows": []},
+                          "table": {"use": False, "caption": "", "headers": [], "rows": []},
+                          "cuisine_plate_examples": [],
                           "key_takeaway": "", "image_prompt": "", "review_note": "Full review needed"}],
             "quick_reference_checklist": [],
-            "mid_doc_cta": "Join our private WhatsApp community for ongoing support.",
-            "end_cta": "Ready to go deeper? Book your next call with Elaine at newtofitness.com.",
-            "note_to_send_to_client": f"Hi {client_name}, here is the guide we discussed.",
-            "keyword": "cultural food guide",
+            "trainerize_habits": [],
+            "mid_doc_cta": "You don't have to figure this out alone — join our private WhatsApp community for ongoing support and accountability.",
+            "end_cta": "Ready to go deeper? Book your next call with Elaine at newtofitness.com. Follow @ilaineyflex for daily tips.",
+            "note_to_send_to_client": f"Hi {client_name}, here is the guide we discussed on our call.",
+            "references": [],
+            "keyword": "cultural food swaps",
         }
     return result
 
@@ -346,7 +409,7 @@ Return ONLY valid JSON with no markdown fences:
 
 Include 3-5 upsell products, 3-5 lead magnets, 5 carousel scripts."""
 
-    raw = _groq(prompt, temperature=0.5, max_tokens=5000)
+    raw = _groq(prompt, temperature=0.5, max_tokens=5000, model=MODEL_FAST)
     result = _parse_json(raw)
     if not isinstance(result, dict):
         result = {"upsell_products": [], "lead_magnets": [],
@@ -427,7 +490,7 @@ Return ONLY valid JSON with no markdown fences:
   "end_cta": "Closing CTA: book a discovery call + follow @ilaineyflex + join community (3 sentences, warm and direct)"
 }}"""
 
-    raw = _groq(prompt, temperature=0.4, max_tokens=6000)
+    raw = _groq(prompt, temperature=0.4, max_tokens=6000, model=MODEL_FAST)
     result = _parse_json(raw)
     if not isinstance(result, dict) or not result.get("sections"):
         result = {
@@ -507,7 +570,7 @@ Return ONLY valid JSON with no markdown fences:
   "cta_social": "Invite to follow @ilaineyflex for daily tips (1 sentence)"
 }}"""
 
-    raw = _groq(prompt, temperature=0.4, max_tokens=3500)
+    raw = _groq(prompt, temperature=0.4, max_tokens=3500, model=MODEL_FAST)
     result = _parse_json(raw)
     if not isinstance(result, dict) or not result.get("sections"):
         result = {
@@ -888,7 +951,7 @@ def build_client_guide_docx(guide_data, client_name):
                 guide_data.get("subtitle", ""),
                 "New To Fitness | @ilaineyflex")
 
-    # Problem statement + intro
+    # Problem statement
     ps = guide_data.get("problem_statement", "")
     if ps:
         p = doc.add_paragraph()
@@ -899,14 +962,30 @@ def build_client_guide_docx(guide_data, client_name):
         r.font.color.rgb = WINE
         p.paragraph_format.space_after = Pt(8)
 
+    # Structured intro (science stat + story + promise)
+    for intro_key in ("intro_science", "intro_story", "intro_promise"):
+        text = guide_data.get(intro_key, "")
+        if text:
+            p = doc.add_paragraph(text)
+            p.paragraph_format.space_after = Pt(6)
+
+    # Fallback for old-format single intro string
     intro = guide_data.get("intro", "")
-    if intro:
+    if intro and not guide_data.get("intro_science"):
         p = doc.add_paragraph(intro)
         p.paragraph_format.space_after = Pt(10)
 
     # Sections
     for i, s in enumerate(guide_data.get("sections", []), 1):
         _section_heading(doc, s.get("heading", ""))
+
+        # Section intro — explains what this section covers before content
+        s_intro = s.get("section_intro", "")
+        if s_intro:
+            p = doc.add_paragraph(s_intro)
+            p.paragraph_format.space_before = Pt(4)
+            p.paragraph_format.space_after  = Pt(8)
+
         _key_insight_box(doc, s.get("key_insight_box", ""))
         _action_steps(doc, s.get("action_steps", []))
 
@@ -915,16 +994,49 @@ def build_client_guide_docx(guide_data, client_name):
             _add_table(doc, tbl["headers"], tbl.get("rows", []),
                        caption=tbl.get("caption", ""))
 
+        # Cuisine plate examples (Section 3 — Hormone-Friendly Plate)
+        plates = s.get("cuisine_plate_examples", [])
+        if plates:
+            ph = doc.add_paragraph()
+            r = ph.add_run("Hormone-Friendly Plate Examples Across Cultural Cuisines")
+            r.font.size = Pt(11); r.font.bold = True; r.font.color.rgb = WINE
+            ph.paragraph_format.space_before = Pt(10)
+            ph.paragraph_format.space_after  = Pt(4)
+            for plate in plates:
+                pc = doc.add_paragraph()
+                rc = pc.add_run(plate.get("cuisine", "") + ": ")
+                rc.font.bold = True; rc.font.color.rgb = WINE; rc.font.size = Pt(10.5)
+                rt = pc.add_run(plate.get("plate_description", ""))
+                rt.font.size = Pt(10.5); rt.font.color.rgb = CHOCOLATE
+                pc.paragraph_format.space_after = Pt(3)
+                _image_placeholder(doc, plate.get("image_prompt", ""))
+
         _key_takeaway(doc, s.get("key_takeaway", ""))
         _image_placeholder(doc, s.get("image_prompt", ""))
         _review_callout(doc, s.get("review_note", ""))
 
-        # Mid-doc CTA after section 2
-        if i == 2:
+        # Mid-doc CTA after section 4
+        if i == 4:
             _cta_block(doc, guide_data.get("mid_doc_cta", ""), style='mid')
 
     # Quick reference checklist
     _checklist(doc, guide_data.get("quick_reference_checklist", []))
+
+    # References
+    refs = guide_data.get("references", [])
+    if refs:
+        doc.add_paragraph()
+        rh = doc.add_paragraph()
+        r = rh.add_run("References")
+        r.font.size = Pt(11); r.font.bold = True; r.font.color.rgb = WINE
+        rh.paragraph_format.space_before = Pt(12)
+        _set_para_border(rh, 'bottom', 'D4A347', size='4')
+        for ref in refs:
+            rp = doc.add_paragraph()
+            rr = rp.add_run(f"• {ref}")
+            rr.font.size = Pt(9); rr.font.italic = True; rr.font.color.rgb = CHOCOLATE
+            rp.paragraph_format.left_indent = Inches(0.2)
+            rp.paragraph_format.space_after = Pt(2)
 
     # Closing CTA
     _cta_block(doc, guide_data.get("end_cta", ""), style='end')
@@ -1239,8 +1351,20 @@ def run_guide_pipeline(client_name, topic, client_context, transcript, fathom_su
         note        = guide_data.get("note_to_send_to_client", "")
         guide_path  = build_client_guide_docx(guide_data, client_name)
         safe        = re.sub(r'[^\w\s-]', '', guide_name).strip().replace(' ', '_')
+
+        # Build the Slack comment: note to send + Trainerize habits for the coach
+        habits      = guide_data.get("trainerize_habits", [])
+        habits_text = ""
+        if habits:
+            habits_list = "\n".join(f"  - {h}" for h in habits)
+            habits_text = (
+                f"\n\n*Trainerize Habits to Add (for any client using this guide):*\n"
+                f"{habits_list}\n"
+                f"_Add whichever the client decides to prioritize as a trackable habit in the app._"
+            )
+
         upload_file_to_slack(channel_id, thread_ts, guide_path, f"{safe}.docx",
-                             f"*Note to send to client:*\n{note}")
+                             f"*Note to send to client:*\n{note}{habits_text}")
         print(f"Client guide posted for {client_name}")
 
         # 2. Market research
