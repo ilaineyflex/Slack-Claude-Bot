@@ -25,6 +25,8 @@ SALES_REJECTS_CHANNEL = os.environ.get("SALES_REJECTS_CHANNEL", "C07KE1XN4TU")
 CLOSED_LEADS_CHANNEL  = os.environ.get("CLOSED_LEADS_CHANNEL", "C07JPA9HZMJ")
 FALLBACK_CHANNEL      = os.environ.get("FALLBACK_CHANNEL", "ceo-braindump")
 
+SALES_BOT_URL = os.environ.get("SALES_BOT_URL", "https://slack-claude-bot-1.onrender.com")
+
 SALES_CALL_KEYWORDS = [
     "sales call", "assessment call", "hormonal blueprint",
     "rescheduled sales call", "follow up assessment", "free assessment",
@@ -123,6 +125,22 @@ scheduler.add_job(
     "interval",
     minutes=5,
     id="poll_sales_calls",
+    replace_existing=True
+)
+
+
+def _keep_alive_ping():
+    try:
+        requests.get(f"{SALES_BOT_URL}/ping", timeout=10)
+    except Exception:
+        pass
+
+
+scheduler.add_job(
+    _keep_alive_ping,
+    "interval",
+    minutes=5,
+    id="keep_alive_ping",
     replace_existing=True
 )
 
@@ -392,17 +410,23 @@ def _groq_json(prompt):
 
 def _extract_closed_data(fathom_summary, transcript, lead_name):
     tz        = pytz.timezone(TIMEZONE)
-    today_str = datetime.now(tz).strftime("%Y-%m-%d")
+    _now      = datetime.now(tz)
+    today_str = f"{_now.strftime('%B')} {_now.day}, {_now.year}"
     content   = (fathom_summary or transcript)[:6000]
-    prompt = f"""Extract deal details from this closed sales call. Lead: {lead_name}. Today: {today_str}.
+    prompt = f"""Extract deal details from this closed sales call. Lead: {lead_name}.
+
+IMPORTANT DATE RULES:
+- Use ONLY dates explicitly mentioned in the content below. Do NOT use today's date ({today_str}) for deposit_info or start_date unless those exact dates appear in the content.
+- deposit_info: use the call date mentioned in the content (e.g. "recorded May 27" or "today May 27"). Only use today ({today_str}) if no other date is mentioned in the content.
+- start_date: use the onboarding/start date the client agreed to on the call, as stated in the content.
+- end_date: calculate as start_date + (program_weeks * 7) days.
+- backend_call_date: calculate as end_date minus 30 days.
+- All dates formatted as "Month D, YYYY" (e.g. "May 27, 2026").
 
 Content:
 {content}
 
-Return ONLY valid JSON. All dates as "Month D, YYYY" (e.g. "June 15, 2026").
-end_date = start_date + (program_weeks * 7) days.
-backend_call_date = end_date minus 30 days.
-
+Return ONLY valid JSON:
 {{
   "coach": "Elaine",
   "program_name": "exact program name from call",
