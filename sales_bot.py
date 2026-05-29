@@ -290,6 +290,7 @@ def _handle_closed(lead_name, ig_handle, setter_id, thread_ts,
     )
     if thread_ts:
         _post(BOOKEDSETS_CHANNEL, thread_ts, bookedsets_post)
+        _react(BOOKEDSETS_CHANNEL, thread_ts, "large_green_circle")
     else:
         _notify_fallback(
             f"Could not find #bookedsets thread for *{lead_name}*. "
@@ -439,7 +440,7 @@ Return ONLY valid JSON:
   "start_date": "e.g. June 15, 2026",
   "end_date": "start_date + program_weeks*7 days as Month D, YYYY",
   "backend_call_date": "end_date minus 30 days as Month D, YYYY",
-  "call_summary": "2-3 paragraph narrative: key health concerns, what resonated, objections overcome, what closed the deal"
+  "call_summary": "bullet list (each bullet on its own line starting with •) covering: key health concerns, what resonated most, any objections and how they were overcome, what ultimately closed the deal — keep each bullet concise (1 sentence)"
 }}"""
     return _groq_json(prompt)
 
@@ -673,6 +674,20 @@ def _post(channel_id, thread_ts, text):
     result = resp.json()
     if not result.get("ok"):
         print(f"Slack post error: {result.get('error','unknown')}")
+    return result
+
+
+def _react(channel_id, message_ts, emoji):
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+    resp = requests.post(
+        "https://slack.com/api/reactions.add",
+        headers=headers,
+        json={"channel": channel_id, "timestamp": message_ts, "name": emoji},
+        timeout=15
+    )
+    result = resp.json()
+    if not result.get("ok") and result.get("error") != "already_reacted":
+        print(f"Slack reaction error: {result.get('error','unknown')}")
     return result
 
 
