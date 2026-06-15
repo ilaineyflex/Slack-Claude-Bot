@@ -116,19 +116,25 @@ def run_retroactive():
         print(f"Found {len(events)} matching calendar events")
 
         processing = []
+        events_batch = []
         for event in events:
             title = event.get("summary", "")
             if "Client Check-In Call" not in title:
                 continue
             client_name = extract_client_name_from_calendar_title(title)
             print(f"Queuing: {title} -> Client: {client_name}")
-            t = threading.Thread(
-                target=run_post_call_automation,
-                args=[client_name, title, None, 1],  # no retries for retroactive
-                daemon=True
-            )
-            t.start()
+            events_batch.append((client_name, title))
             processing.append({"title": title, "client": client_name})
+
+        # Process sequentially in a single background thread so we don't hammer
+        # the Fathom API with simultaneous requests and trigger 429 rate limits.
+        def _run_batch(batch):
+            for i, (cname, ctitle) in enumerate(batch):
+                if i > 0:
+                    time.sleep(8)
+                run_post_call_automation(cname, ctitle, None, 1)
+
+        threading.Thread(target=_run_batch, args=[events_batch], daemon=True).start()
 
         return jsonify({"processing": processing, "count": len(processing), "status": "started in background"}), 200
 
@@ -749,20 +755,40 @@ def find_client_thread(client_name):
         params={"channel": channel_id, "limit": 200}
     )
     name_lower = client_name.lower()
+    # First name only as fallback — only used if full-name search finds nothing.
+    # Guard against very short names (< 4 chars) causing false matches.
+    first_name = name_lower.split()[0] if name_lower else ""
+    first_name_match = None
+
     for msg in resp.json().get("messages", []):
         if msg.get("thread_ts") and msg["thread_ts"] != msg["ts"]:
             continue
         first_line = msg.get("text", "").split("\n")[0].lower()
         if name_lower in first_line:
             return channel_id, msg["ts"]
+        if first_name and len(first_name) > 3 and first_name in first_line and not first_name_match:
+            first_name_match = (channel_id, msg["ts"])
+
+    if first_name_match:
+        print(f"Thread found for {client_name} via first-name fallback")
+        return first_name_match
 
     print(f"No thread found for: {client_name}")
     return None
 
 def extract_client_name_from_calendar_title(title):
-    title = re.split(r'\s*-\s*Client Check-In Call', title)[0].strip()
+    # Strip "- Client Check-In Call" suffix
+    title = re.split(r'\s*-\s*Client Check-In Call', title, flags=re.IGNORECASE)[0].strip()
+    # Strip HH:MM time format (e.g. "7:30")
     title = re.split(r'\s*-?\s*\d+:\d+', title)[0].strip()
+    # Strip hour-only time formats (e.g. "1pm", "6 PM", "8 PM", "12am")
+    title = re.split(r'\s*-?\s*\d+\s*[ap]m\b', title, flags=re.IGNORECASE)[0].strip()
+    # Strip *annotations* (e.g. *MAIN*)
     title = re.sub(r'\*[^*]+\*', '', title).strip(' -').strip()
+    # Strip bare MAIN suffix (without asterisks)
+    title = re.sub(r'\s*\bMAIN\b', '', title, flags=re.IGNORECASE).strip(' -').strip()
+    # Strip emojis and non-Latin characters that won't appear in Slack roster names
+    title = re.sub(r'[^\x00-\x7FÀ-ɏ]+', '', title).strip(' -').strip()
     return title
 
 def extract_name_from_title(call_title):
