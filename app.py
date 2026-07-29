@@ -107,7 +107,7 @@ def run_retroactive():
             calendarId=ELAINE_CALENDAR_ID,
             timeMin=start_dt.isoformat(),
             timeMax=end_dt.isoformat(),
-            q="Client Check-In Call",
+            q="client check in call",
             singleEvents=True,
             orderBy="startTime"
         ).execute()
@@ -119,7 +119,7 @@ def run_retroactive():
         events_batch = []
         for event in events:
             title = event.get("summary", "")
-            if "Client Check-In Call" not in title:
+            if not re.search(r'client\s+check.?in\s+call', title, re.IGNORECASE):
                 continue
             client_name = extract_client_name_from_calendar_title(title)
             print(f"Queuing: {title} -> Client: {client_name}")
@@ -306,7 +306,7 @@ def ghl_webhook():
 
     print(f"Title: {appointment_title} | Client: {client_name} | End: {end_time_str}")
 
-    if "Client Check-In Call" not in appointment_title:
+    if not re.search(r'client\s+check.?in\s+call', appointment_title, re.IGNORECASE):
         print("Not a Client Check-In Call, skipping.")
         return "", 200
 
@@ -777,8 +777,8 @@ def find_client_thread(client_name):
     return None
 
 def extract_client_name_from_calendar_title(title):
-    # Strip "- Client Check-In Call" suffix
-    title = re.split(r'\s*-\s*Client Check-In Call', title, flags=re.IGNORECASE)[0].strip()
+    # Strip "- client check-in call" / "- client check in call" suffix (any casing/hyphenation)
+    title = re.split(r'\s*-?\s*client\s+check.?in\s+call', title, flags=re.IGNORECASE)[0].strip()
     # Strip HH:MM time format (e.g. "7:30")
     title = re.split(r'\s*-?\s*\d+:\d+', title)[0].strip()
     # Strip hour-only time formats (e.g. "1pm", "6 PM", "8 PM", "12am")
