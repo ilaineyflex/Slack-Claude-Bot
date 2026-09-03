@@ -678,7 +678,7 @@ Return ONLY valid JSON, no markdown, no extra text. Use \\n for newlines inside 
 tasks_with_dates: ONLY tasks where a specific date was explicitly stated. Use year {current_year} unless stated otherwise. Use "09:00" if no time given. Return [] if none."""
 
     completion = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3
     )
@@ -783,6 +783,8 @@ def extract_client_name_from_calendar_title(title):
     title = re.split(r'\s*-?\s*\d+:\d+', title)[0].strip()
     # Strip hour-only time formats (e.g. "1pm", "6 PM", "8 PM", "12am")
     title = re.split(r'\s*-?\s*\d+\s*[ap]m\b', title, flags=re.IGNORECASE)[0].strip()
+    # Strip day-of-week suffix and anything after it (e.g. "- Wednesday", "- Wed", "Wednesday 4:00 PDT")
+    title = re.sub(r'\s*-?\s*\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b.*', '', title, flags=re.IGNORECASE).strip(' -').strip()
     # Strip *annotations* (e.g. *MAIN*)
     title = re.sub(r'\*[^*]+\*', '', title).strip(' -').strip()
     # Strip bare MAIN suffix (without asterisks)
